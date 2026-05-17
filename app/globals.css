@@ -1,26 +1,30 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ============================================================================
+   FAMILY TREE — Design tokens
+   ============================================================================
+   Custom font families, colors, and shadows used across the app.
+   ============================================================================ */
+
+@theme {
+  /* Font families — wired to next/font CSS variables */
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-display: var(--font-display), cursive;
+  --font-script: var(--font-script), cursive;
+  --font-historic: var(--font-historic), serif;
+
+  /* Brand colors */
+  --color-violet-accent: #a855f7;
+  --color-cyan-accent: #00ffd4;
+
+  /* Surface tones */
+  --color-surface-deep: #0a0a0f;
+  --color-surface-raised: #13131a;
+  --color-surface-border: #2a2a35;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Smooth dark scrollbars */
+html {
+  scrollbar-color: #2a2a35 #0a0a0f;
 }

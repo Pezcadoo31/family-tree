@@ -1,81 +1,332 @@
 import { supabase } from '@/lib/supabase';
-import type { Person } from '@/lib/types';
+import type { Person, Pet } from '@/lib/types';
 
-// This is a Server Component (no 'use client' directive)
-// It runs on the server, fetches data, and sends rendered HTML to the browser
+// ============================================================================
+// HELPERS — pure functions for formatting
+// ============================================================================
+
+/** Calculates age in years from a birth date string */
+function calculateAge(birthDate: string | null): number | null {
+  if (!birthDate) return null;
+  const [year, month, day] = birthDate.split('-').map(Number);
+  const birth = new Date(year, month - 1, day);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+/** Returns initials from a person's given name and paternal surname */
+function getInitials(person: Person): string {
+  const first = person.given_name?.[0] ?? '';
+  const last = person.paternal_surname?.[0] ?? '';
+  return (first + last).toUpperCase();
+}
+
+/** Formats a date string into a Spanish short format (e.g., "3 ene 2004") */
+function formatDateShort(date: string | null): string | null {
+  if (!date) return null;
+  // Parse as UTC to avoid timezone shifting the day backwards
+  const [year, month, day] = date.split('-').map(Number);
+  const localDate = new Date(year, month - 1, day);
+  return localDate.toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+// ============================================================================
+// PAGE COMPONENT — Server Component
+// ============================================================================
+
 export default async function Home() {
-  // Fetch all persons from the database
-  const { data: persons, error } = await supabase
-    .from('persons')
-    .select('*')
-    .order('given_name', { ascending: true });
+  // Fetch persons and pets in parallel
+  const [personsResult, petsResult] = await Promise.all([
+    supabase.from('persons').select('*').order('given_name'),
+    supabase.from('pets').select('*').order('name'),
+  ]);
 
-  // Handle errors gracefully
+  const persons: Person[] = personsResult.data ?? [];
+  const pets: Pet[] = petsResult.data ?? [];
+  const error = personsResult.error ?? petsResult.error;
+
+  // Error state — graceful fallback
   if (error) {
     return (
       <main className="min-h-screen flex items-center justify-center p-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold text-red-600">
-            Error loading family tree
+        <div className="text-center max-w-md">
+          <h1 className="text-2xl font-medium text-red-400 mb-2">
+            Error al cargar el ecosistema familiar
           </h1>
-          <p className="mt-2 text-zinc-500">{error.message}</p>
+          <p className="text-zinc-500 text-sm">{error.message}</p>
         </div>
       </main>
     );
   }
 
-  // Render the list of persons
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8">
-      <div className="w-full max-w-2xl">
-        <header className="text-center mb-12">
-          <h1 className="text-4xl font-semibold tracking-tight">
+    <main className="min-h-screen max-w-3xl mx-auto px-6 py-12">
+      {/* ====================================================================
+          HEADER — minimalist, with pulsing violet anchor
+          ==================================================================== */}
+      <header className="flex items-center justify-between mb-10">
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-2 h-2 rounded-full bg-violet-accent"
+            style={{ boxShadow: '0 0 12px rgba(168, 85, 247, 0.6)' }}
+          />
+          <span className="text-sm font-medium tracking-wide text-zinc-50">
             Family Tree
-          </h1>
-          <p className="mt-3 text-zinc-500">
-            Una plataforma para preservar tu historia familiar.
-          </p>
-        </header>
+          </span>
+        </div>
+        <button className="px-3.5 py-1.5 rounded-full text-xs font-medium text-violet-300 border border-violet-accent/40 bg-violet-accent/10 hover:bg-violet-accent/20 transition-colors">
+          + Agregar
+        </button>
+      </header>
 
-        <section>
-          <h2 className="text-lg font-semibold mb-4">
-            Personas registradas ({persons?.length ?? 0})
-          </h2>
+      {/* ====================================================================
+          HERO — page title with tracked typography
+          ==================================================================== */}
+      <section className="mb-12">
+        <h1 className="text-4xl font-medium text-zinc-50 mb-2 leading-tight tracking-tight">
+          tu ecosistema familiar
+        </h1>
+        <p className="text-zinc-500 text-base">
+          una constelación viva de quienes te formaron y acompañan.
+        </p>
+      </section>
 
-          {persons && persons.length > 0 ? (
-            <ul className="space-y-2">
-              {persons.map((person: Person) => (
-                <li
-                  key={person.id}
-                  className="p-4 border border-zinc-200 rounded-lg"
-                >
-                  <p className="font-medium">
-                    {person.given_name}
-                    {person.paternal_surname && ` ${person.paternal_surname}`}
-                    {person.maternal_surname && ` ${person.maternal_surname}`}
-                    {person.nickname && (
-                      <span className="text-zinc-500 font-normal">
-                        {' '}
-                        ({person.nickname})
-                      </span>
-                    )}
-                  </p>
-                  {person.birth_date && (
-                    <p className="text-sm text-zinc-500 mt-1">
-                      Nacido el {person.birth_date}
-                      {person.birth_place && ` en ${person.birth_place}`}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-zinc-500 text-center py-8">
-              No hay personas registradas todavía.
+      {/* ====================================================================
+          METRICS — 3 surface cards
+          ==================================================================== */}
+      <section className="grid grid-cols-3 gap-2.5 mb-12">
+        <MetricCard label="PERSONAS" value={persons.length} />
+        <MetricCard label="MASCOTAS" value={pets.length} />
+        <MetricCard label="GENERACIONES" value={persons.length > 0 ? 1 : 0} />
+      </section>
+
+      {/* ====================================================================
+          PERSONS SECTION
+          ==================================================================== */}
+      <section className="mb-12">
+        <SectionHeader
+          title="personas"
+          meta={`${persons.length} ${persons.length === 1 ? 'registrada' : 'registradas'}`}
+        />
+        {persons.length === 0 ? (
+          <EmptyState
+            accent="violet"
+            message="Aún no hay personas registradas."
+          />
+        ) : (
+          <div className="space-y-3">
+            {persons.map((person) => (
+              <PersonCard key={person.id} person={person} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ====================================================================
+          PETS SECTION
+          ==================================================================== */}
+      <section className="mb-12">
+        <SectionHeader
+          title="mascotas"
+          meta={`${pets.length} ${pets.length === 1 ? 'registrada' : 'registradas'}`}
+        />
+        {pets.length === 0 ? (
+          <EmptyState
+            accent="cyan"
+            message="Aún no hay mascotas en tu familia."
+          />
+        ) : (
+          <div className="space-y-3">
+            {pets.map((pet) => (
+              <PetCard key={pet.id} pet={pet} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ====================================================================
+          FOOTER — phase indicator + pulsing dots
+          ==================================================================== */}
+      <footer className="pt-6 border-t border-surface-border/50 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-widest text-zinc-600">
+          Fase A · vista de lista · próximo: la red visual
+        </span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-violet-accent/60" />
+          <div className="w-1.5 h-1.5 rounded-full bg-cyan-accent/60" />
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+// ============================================================================
+// SUBCOMPONENTS — local to this file
+// ============================================================================
+
+/** Small metric card used in the metrics row */
+function MetricCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-surface-raised border border-surface-border rounded-xl px-4 py-3">
+      <div className="text-[11px] tracking-wider text-zinc-500 mb-1.5">
+        {label}
+      </div>
+      <div className="text-2xl font-medium text-zinc-50">{value}</div>
+    </div>
+  );
+}
+
+/** Section header with title + meta */
+function SectionHeader({ title, meta }: { title: string; meta: string }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="text-[13px] font-medium tracking-widest uppercase text-zinc-50">
+        {title}
+      </h2>
+      <span className="text-xs text-zinc-600">{meta}</span>
+    </div>
+  );
+}
+
+/** Empty state for sections without data */
+function EmptyState({
+  accent,
+  message,
+}: {
+  accent: 'violet' | 'cyan';
+  message: string;
+}) {
+  const accentClasses =
+    accent === 'violet'
+      ? 'border-violet-accent/15'
+      : 'border-cyan-accent/15';
+
+  return (
+    <div
+      className={`bg-surface-raised border ${accentClasses} rounded-2xl p-8 text-center`}
+    >
+      <p className="text-zinc-500 text-sm">{message}</p>
+    </div>
+  );
+}
+
+/** Person card with violet accent and Great Vibes nickname */
+function PersonCard({ person }: { person: Person }) {
+  const age = calculateAge(person.birth_date);
+  const birthFormatted = formatDateShort(person.birth_date);
+  const initials = getInitials(person);
+
+  return (
+    <article
+      className="relative bg-surface-raised border border-violet-accent/15 rounded-2xl p-5 overflow-hidden"
+    >
+      {/* Glowing left bar */}
+      <div
+        className="absolute top-0 left-0 w-0.75 h-full bg-violet-accent"
+        style={{ boxShadow: '0 0 16px rgba(168, 85, 247, 0.5)' }}
+      />
+
+      <div className="flex gap-4 items-start">
+        {/* Avatar */}
+        <div className="w-14 h-14 rounded-full bg-violet-accent/15 border border-violet-accent/40 flex items-center justify-center text-violet-300 text-lg font-medium shrink-0">
+          {initials}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+            <span className="text-zinc-50 text-base font-medium">
+              {person.given_name} {person.paternal_surname} {person.maternal_surname}
+            </span>
+            {person.nickname && (
+              <span
+                className="text-xl text-violet-300 leading-none"
+                style={{ fontFamily: 'var(--font-script)' }}
+              >
+                &ldquo;{person.nickname}&rdquo;
+              </span>
+            )}
+          </div>
+
+          {/* Metadata row */}
+          <div className="flex gap-3 text-zinc-500 text-xs mb-2 flex-wrap">
+            {birthFormatted && <span>📅 {birthFormatted}</span>}
+            {person.birth_place && <span>📍 {person.birth_place}</span>}
+            {person.languages?.length > 0 && (
+              <span>🌐 {person.languages.length} idiomas</span>
+            )}
+          </div>
+
+          {/* Bio / occupation */}
+          {person.occupation && (
+            <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+              {person.occupation}
+              {person.nationality?.length > 0 && (
+                <span className="text-zinc-600">
+                  {' · '}
+                  {person.nationality.join(', ')}
+                </span>
+              )}
             </p>
           )}
-        </section>
+
+          {/* Chips */}
+          <div className="flex gap-1.5 flex-wrap">
+            {age !== null && (
+              <span className="px-2.5 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-[11px] text-violet-300">
+                {age} años
+              </span>
+            )}
+            {person.religion && (
+              <span className="px-2.5 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-[11px] text-violet-300">
+                {person.religion}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
-    </main>
+    </article>
+  );
+}
+
+/** Pet card with cyan accent (placeholder for future use) */
+function PetCard({ pet }: { pet: Pet }) {
+  return (
+    <article
+      className="relative bg-surface-raised border border-cyan-accent/15 rounded-2xl p-5 overflow-hidden"
+    >
+      <div
+        className="absolute top-0 left-0 w-0.75 h-full bg-cyan-accent"
+        style={{ boxShadow: '0 0 16px rgba(0, 255, 212, 0.5)' }}
+      />
+      <div className="flex gap-4 items-start">
+        <div className="w-14 h-14 rounded-full bg-cyan-accent/15 border border-cyan-accent/40 flex items-center justify-center text-cyan-300 text-2xl shrink-0">
+          🐾
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="text-zinc-50 text-base font-medium">{pet.name}</span>
+            {pet.nickname && (
+              <span
+                className="text-xl text-cyan-300 leading-none"
+                style={{ fontFamily: 'var(--font-script)' }}
+              >
+                &ldquo;{pet.nickname}&rdquo;
+              </span>
+            )}
+          </div>
+          <div className="text-zinc-500 text-xs">{pet.species}</div>
+        </div>
+      </div>
+    </article>
   );
 }
