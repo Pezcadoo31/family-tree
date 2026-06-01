@@ -264,7 +264,7 @@ export function AddPersonSheet({ open, onClose }: SheetProps) {
             Cancelar
           </button>
           <button
-            type="submit"
+            type="button" onClick={handleSubmit}
             disabled={isPending || !form.given_name.trim()}
             className="px-5 py-2 rounded-lg text-sm font-medium bg-violet-accent/20 border border-violet-accent/40 text-violet-300 hover:bg-violet-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
