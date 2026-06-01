@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { Person, Pet } from '@/lib/types';
+import { HomeClient } from '@/components/HomeClient'; 
 
 // ============================================================================
 // HELPERS — pure functions for formatting
@@ -83,9 +84,7 @@ export default async function Home() {
             Family Tree
           </span>
         </div>
-        <button className="px-3.5 py-1.5 rounded-full text-xs font-medium text-violet-300 border border-violet-accent/40 bg-violet-accent/10 hover:bg-violet-accent/20 transition-colors">
-          + Agregar
-        </button>
+        <HomeClient />
       </header>
 
       {/* ====================================================================
