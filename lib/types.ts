@@ -47,7 +47,7 @@ export type Person = {
 // RELATIONSHIP TYPES (person ↔ person)
 // ============================================================================
 
-export type RelationshipType = 'parent_of' | 'spouse_of';
+export type RelationshipType = 'parent_of' | 'spouse_of' | 'sibling_of';
 
 export type ParentSubtype =
   | 'biological'
@@ -62,6 +62,12 @@ export type SpouseSubtype =
   | 'widowed'
   | 'partner';
 
+export type SiblingSubtype =
+  | 'full'
+  | 'half'
+  | 'step'
+  | 'adoptive';
+
 export type Relationship = {
   id: string;
   person_a_id: string;
@@ -69,6 +75,7 @@ export type Relationship = {
   type: RelationshipType;
   parent_subtype: ParentSubtype | null;
   spouse_subtype: SpouseSubtype | null;
+  sibling_subtype: SiblingSubtype | null;   
   start_date: string | null;
   end_date: string | null;
   notes: string | null;

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { Person, Pet } from '@/lib/types';
+import type { Person, Pet, Relationship } from '@/lib/types';
 import { HomeClient } from '@/components/HomeClient'; 
 
 // ============================================================================
@@ -45,15 +45,21 @@ function formatDateShort(date: string | null): string | null {
 // ============================================================================
 
 export default async function Home() {
-  // Fetch persons and pets in parallel
-  const [personsResult, petsResult] = await Promise.all([
+  // Fetch persons, pets y relationships en paralelo
+  const [personsResult, petsResult, relationshipsResult] = await Promise.all([
     supabase.from('persons').select('*').order('given_name'),
     supabase.from('pets').select('*').order('name'),
+    supabase.from('relationships').select(`
+      *,
+      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname),
+      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname)
+    `).order('created_at', { ascending: false }),
   ]);
 
   const persons: Person[] = personsResult.data ?? [];
   const pets: Pet[] = petsResult.data ?? [];
-  const error = personsResult.error ?? petsResult.error;
+  const relationships = relationshipsResult.data ?? [];
+  const error = personsResult.error ?? petsResult.error ?? relationshipsResult.error;
 
   // Error state — graceful fallback
   if (error) {
@@ -84,7 +90,7 @@ export default async function Home() {
             Family Tree
           </span>
         </div>
-        <HomeClient />
+        <HomeClient persons={persons} />
       </header>
 
       {/* ====================================================================
@@ -125,6 +131,28 @@ export default async function Home() {
           <div className="space-y-3">
             {persons.map((person) => (
               <PersonCard key={person.id} person={person} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ====================================================================
+          RELATIONSHIPS SECTION
+          ==================================================================== */}
+      <section className="mb-12">
+        <SectionHeader
+          title="relaciones"
+          meta={`${relationships.length} ${relationships.length === 1 ? 'vínculo' : 'vínculos'}`}
+        />
+        {relationships.length === 0 ? (
+          <EmptyState
+            accent="violet"
+            message="Aún no hay vínculos registrados."
+          />
+        ) : (
+          <div className="space-y-2">
+            {relationships.map((rel: RelationshipWithPersons) => (
+              <RelationshipCard key={rel.id} relationship={rel} />
             ))}
           </div>
         )}
@@ -327,5 +355,60 @@ function PetCard({ pet }: { pet: Pet }) {
         </div>
       </div>
     </article>
+  );
+}
+
+/** Relationship card showing the bond between two persons */
+type RelationshipWithPersons = Relationship & {
+  person_a: { id: string; given_name: string; paternal_surname: string | null; nickname: string | null } | null;
+  person_b: { id: string; given_name: string; paternal_surname: string | null; nickname: string | null } | null;
+};
+
+function RelationshipCard({ relationship }: { relationship: RelationshipWithPersons }) {
+  const nameA = [relationship.person_a?.given_name, relationship.person_a?.paternal_surname]
+    .filter(Boolean).join(' ');
+  const nameB = [relationship.person_b?.given_name, relationship.person_b?.paternal_surname]
+    .filter(Boolean).join(' ');
+
+  const typeLabel =
+    relationship.type === 'parent_of'  ? relationship.parent_subtype  === 'biological' ? 'Padre/Madre biológico/a' :
+                                         relationship.parent_subtype  === 'adoptive'   ? 'Padre/Madre adoptivo/a'  :
+                                         relationship.parent_subtype  === 'step'       ? 'Padrastro/Madrastra'     : 'Tutor/a temporal' :
+    relationship.type === 'spouse_of'  ? relationship.spouse_subtype  === 'married'    ? 'Casados'     :
+                                         relationship.spouse_subtype  === 'divorced'   ? 'Divorciados' :
+                                         relationship.spouse_subtype  === 'separated'  ? 'Separados'   :
+                                         relationship.spouse_subtype  === 'widowed'    ? 'Viudo/a'     : 'Pareja' :
+    relationship.type === 'sibling_of' ? relationship.sibling_subtype === 'full'      ? 'Hermanos completos' :
+                                         relationship.sibling_subtype === 'half'      ? 'Medio hermanos'    :
+                                         relationship.sibling_subtype === 'step'      ? 'Hermanastros'      : 'Hermanos adoptivos' :
+    'Vínculo';
+
+  const emoji =
+    relationship.type === 'parent_of'  ? '👨‍👧' :
+    relationship.type === 'sibling_of' ? '👫' : '💑';
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 bg-surface-raised border border-violet-accent/10 rounded-xl">
+      <span className="text-lg">{emoji}</span>
+      <div className="flex-1 flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-zinc-200">{nameA}</span>
+        {relationship.person_a?.nickname && (
+          <span className="text-xs text-violet-400" style={{ fontFamily: 'var(--font-script)' }}>
+            &quot;{relationship.person_a.nickname}&quot;
+          </span>
+        )}
+        <span className="text-xs text-zinc-600 mx-1">·</span>
+        <span className="text-xs px-2 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-violet-300">
+          {typeLabel}
+        </span>
+        <span className="text-xs text-zinc-600 mx-1">·</span>
+        <span className="text-sm text-zinc-200">{nameB}</span>
+        {relationship.person_b?.nickname && (
+          <span className="text-xs text-violet-400" style={{ fontFamily: 'var(--font-script)' }}>
+            &quot;{relationship.person_b.nickname}&quot;
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
