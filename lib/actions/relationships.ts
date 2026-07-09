@@ -1,4 +1,4 @@
-"use server";
+  "use server";
 
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
@@ -188,4 +188,29 @@ export async function deleteRelationship(id: string): Promise<ActionResult> {
 
   revalidatePath("/");
   return { success: true, id };
+}
+
+// ============================================================================
+// getRelationshipsForPerson — todas las relaciones donde participa una persona
+// ============================================================================
+
+export async function getRelationshipsForPerson(
+  personId: string
+): Promise<RelationshipWithPersons[]> {
+  const { data, error } = await supabase
+    .from("relationships")
+    .select(`
+      *,
+      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname),
+      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname)
+    `)
+    .or(`person_a_id.eq.${personId},person_b_id.eq.${personId}`)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[getRelationshipsForPerson] Supabase error:", error);
+    return [];
+  }
+
+  return data as RelationshipWithPersons[];
 }

@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import type { Person, Pet } from '@/lib/types';
 import { HomeClient } from '@/components/HomeClient';
 import { RelationshipCard } from '@/components/RelationshipCard';
+import Link from 'next/link';
 
 // ============================================================================
 // HELPERS — pure functions for formatting
@@ -254,8 +255,9 @@ function PersonCard({ person }: { person: Person }) {
   const initials = getInitials(person);
 
   return (
-    <article
-      className="relative bg-surface-raised border border-violet-accent/15 rounded-2xl p-5 overflow-hidden"
+    <Link
+      href={`/persona/${person.id}`}
+      className="relative block bg-surface-raised border border-violet-accent/15 rounded-2xl p-5 overflow-hidden hover:border-violet-accent/30 transition-colors"
     >
       {/* Glowing left bar */}
       <div
@@ -322,7 +324,7 @@ function PersonCard({ person }: { person: Person }) {
           </div>
         </div>
       </div>
-    </article>
+    </Link>
   );
 }
 
