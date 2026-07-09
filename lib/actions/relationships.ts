@@ -170,3 +170,22 @@ export async function getInferredSiblings(): Promise<InferredSiblingPair[]> {
     };
   });
 }
+
+// ============================================================================
+// deleteRelationship
+// ============================================================================
+
+export async function deleteRelationship(id: string): Promise<ActionResult> {
+  const { error } = await supabase
+    .from("relationships")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    console.error("[deleteRelationship] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { success: true, id };
+}
