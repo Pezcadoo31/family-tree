@@ -6,6 +6,7 @@ import {
   type CreateRelationshipInput,
 } from "@/lib/actions/relationships";
 import type { Person, RelationshipType, ParentSubtype, SpouseSubtype, SiblingSubtype } from "@/lib/types";
+import { DatePicker } from "./DatePicker";
 
 // ============================================================================
 // TYPES
@@ -63,18 +64,59 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
   const [form, setForm] = useState<CreateRelationshipInput>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [startAutoFilled, setStartAutoFilled] = useState(false);
+
+  // Calcula la fecha de inicio sugerida para hermanos (nacimiento del más joven)
+  function computeSiblingStartDate(
+    type: RelationshipType,
+    personAId: string,
+    personBId: string
+  ): string | null {
+    if (type !== "sibling_of" || !personAId || !personBId) return null;
+
+    const personA = persons.find((p) => p.id === personAId);
+    const personB = persons.find((p) => p.id === personBId);
+
+    if (personA?.birth_date && personB?.birth_date) {
+      return personA.birth_date > personB.birth_date
+        ? personA.birth_date
+        : personB.birth_date;
+    }
+    return null;
+  }
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     const { name, value } = e.target;
+
     setForm((prev) => {
       const next = { ...prev, [name]: value };
+
       if (name === "type") {
         next.parent_subtype  = value === "parent_of"  ? "biological" : "";
         next.spouse_subtype  = value === "spouse_of"  ? "married"    : "";
         next.sibling_subtype = value === "sibling_of" ? "full"       : "";
       }
+
+      // Auto-completar fecha de inicio solo si aún no fue editada manualmente
+      const relevantChange =
+        name === "type" || name === "person_a_id" || name === "person_b_id";
+
+      if (relevantChange && (!prev.start_date || startAutoFilled)) {
+        const suggested = computeSiblingStartDate(
+          next.type,
+          next.person_a_id,
+          next.person_b_id
+        );
+        if (suggested) {
+          next.start_date = suggested;
+          setStartAutoFilled(true);
+        } else if (next.type !== "sibling_of") {
+          setStartAutoFilled(false);
+        }
+      }
+
       return next;
     });
   }
@@ -82,6 +124,7 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
   function handleClose() {
     setForm(EMPTY_FORM);
     setError(null);
+    setStartAutoFilled(false);
     onClose();
   }
 
@@ -110,7 +153,6 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
      form.type === "spouse_of"  ? !!form.spouse_subtype  :
      form.type === "sibling_of" ? !!form.sibling_subtype : false);
 
-  // Labels dinámicos según tipo
   const labelA =
     form.type === "parent_of"  ? "Padre / Madre" :
     form.type === "sibling_of" ? "Hermano/a A"   : "Persona A";
@@ -255,11 +297,25 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
 
           {/* Fechas */}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Fecha de inicio">
-              <Input type="date" name="start_date" value={form.start_date} onChange={handleChange} />
+            <Field
+              label="Fecha de inicio"
+              hint={startAutoFilled ? "auto: nacimiento del hermano más joven" : undefined}
+            >
+              <DatePicker
+                value={form.start_date}
+                onChange={(val) => {
+                  setForm((prev) => ({ ...prev, start_date: val }));
+                  setStartAutoFilled(false);
+                }}
+                placeholder="Fecha de inicio"
+              />
             </Field>
             <Field label="Fecha de fin">
-              <Input type="date" name="end_date" value={form.end_date} onChange={handleChange} />
+              <DatePicker
+                value={form.end_date}
+                onChange={(val) => setForm((prev) => ({ ...prev, end_date: val }))}
+                placeholder="Fecha de fin"
+              />
             </Field>
           </div>
 
@@ -320,15 +376,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       </label>
       {children}
     </div>
-  );
-}
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className="w-full px-3 py-2 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-violet-accent/50 focus:ring-1 focus:ring-violet-accent/20 transition-colors"
-    />
   );
 }
 

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { createPerson, type CreatePersonInput } from "@/lib/actions/persons";
 import type { Gender } from "@/lib/types";
+import { DatePicker } from "./DatePicker";
 
 // ============================================================================
 // TYPES
@@ -167,7 +168,11 @@ export function AddPersonSheet({ open, onClose }: SheetProps) {
           >
             <div className="grid grid-cols-2 gap-3">
               <Field label="Fecha de nacimiento">
-                <Input type="date" name="birth_date" value={form.birth_date} onChange={handleChange} />
+                <DatePicker 
+                  value={form.birth_date}
+                  onChange={(val) => setForm((prev) => ({ ...prev, birth_date: val }))}
+                  placeholder="Fecha de nacimiento"
+                />
               </Field>
               <Field label="Lugar de nacimiento">
                 <Input name="birth_place" value={form.birth_place} onChange={handleChange} placeholder="Durango, Durango" />
@@ -221,7 +226,11 @@ export function AddPersonSheet({ open, onClose }: SheetProps) {
             onToggle={() => toggleSection("death")}
           >
             <Field label="Fecha de fallecimiento">
-              <Input type="date" name="death_date" value={form.death_date} onChange={handleChange} />
+              <DatePicker
+                value={form.death_date}
+                onChange={(val) => setForm((prev) => ({ ...prev, death_date: val }))}
+                placeholder="Fecha de fallecimiento"
+              />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Lugar">
