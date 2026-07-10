@@ -3,6 +3,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getRelationshipsForPerson, type RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { Person } from "@/lib/types";
+import { PersonProfileActions } from "@/components/PersonProfileActions";
 
 // ============================================================================
 // HELPERS
@@ -85,13 +86,16 @@ export default async function PersonaProfile({ params }: PageProps) {
   return (
     <main className="min-h-screen max-w-2xl mx-auto px-6 py-12">
 
-      {/* Back link */}
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors mb-8"
-      >
-        ← Volver al ecosistema
-      </Link>
+      {/* Back link + actions */}
+      <div className="flex items-center justify-between mb-8">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+        >
+          ← Volver al ecosistema
+        </Link>
+        <PersonProfileActions person={person} />
+      </div>
 
       {/* Header card */}
       <div className="relative bg-surface-raised border border-violet-accent/15 rounded-2xl p-8 mb-8 overflow-hidden">
