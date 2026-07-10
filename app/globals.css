@@ -28,3 +28,38 @@
 html {
   scrollbar-color: #2a2a35 #0a0a0f;
 }
+
+/* ============================================================================
+   FAMILY TREE — Animations
+   ============================================================================ */
+
+@keyframes tree-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-tree-in {
+  animation: tree-in 0.5s ease-out;
+}
+
+@keyframes node-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-node-in {
+  opacity: 0;
+  animation: node-in 0.45s ease-out forwards;
+}

@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { getRelationshipsForPerson, type RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { Person } from "@/lib/types";
 import { PersonProfileActions } from "@/components/PersonProfileActions";
+import { BackLink } from "@/components/BackLink";
 
 // ============================================================================
 // HELPERS
@@ -88,12 +89,7 @@ export default async function PersonaProfile({ params }: PageProps) {
 
       {/* Back link + actions */}
       <div className="flex items-center justify-between mb-8">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-        >
-          ← Volver al ecosistema
-        </Link>
+        <BackLink />
         <PersonProfileActions person={person} />
       </div>
 

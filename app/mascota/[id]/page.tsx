@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import type { Pet } from "@/lib/types";
 import { PetProfileActions } from "@/components/PetProfileActions";
+import { BackLink } from "@/components/BackLink";
 
 // ============================================================================
 // HELPERS
@@ -80,12 +80,7 @@ export default async function MascotaProfile({ params }: PageProps) {
 
       {/* Back link + actions */}
       <div className="flex items-center justify-between mb-8">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-        >
-          ← Volver al ecosistema
-        </Link>
+        <BackLink />
         <PetProfileActions pet={pet} />
       </div>
 

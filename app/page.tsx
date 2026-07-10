@@ -113,17 +113,25 @@ export default async function Home() {
             Family Tree
           </span>
         </div>
-        <HomeClient persons={persons} />
+        <div className="flex items-center gap-2">
+          <Link
+            href="/arbol"
+            className="px-3.5 py-1.5 rounded-full text-xs font-medium text-zinc-400 border border-surface-border bg-surface-raised hover:text-zinc-200 hover:bg-[#1a1a25] transition-colors"
+          >
+            Ver árbol
+          </Link>
+          <HomeClient persons={persons} />
+        </div>
       </header>
 
       {/* ====================================================================
           HERO — page title with tracked typography
           ==================================================================== */}
       <section className="mb-12">
-        <h1 className="text-4xl font-medium text-zinc-50 mb-2 leading-tight tracking-tight">
+        <h1 className="font-historic text-5xl text-zinc-50 mb-2 leading-tight uppercase">
           tu ecosistema familiar
         </h1>
-        <p className="text-zinc-500 text-base">
+        <p className="text-zinc-500 text-base uppercase tracking-wide">
           una constelación viva de quienes te formaron y acompañan.
         </p>
       </section>
