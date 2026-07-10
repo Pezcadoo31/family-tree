@@ -214,3 +214,94 @@ export async function getRelationshipsForPerson(
 
   return data as RelationshipWithPersons[];
 }
+
+// ============================================================================
+// createSiblingGroup — vincula 3+ personas como hermanos entre sí
+// Genera automáticamente todos los pares únicos (combinaciones sin repetición)
+// ============================================================================
+
+export type CreateSiblingGroupInput = {
+  person_ids: string[];
+  sibling_subtype: SiblingSubtype | "";
+  start_date: string;
+  end_date: string;
+  notes: string;
+};
+
+export async function createSiblingGroup(
+  input: CreateSiblingGroupInput
+): Promise<ActionResult> {
+  const ids = Array.from(new Set(input.person_ids.filter(Boolean)));
+
+  if (ids.length < 2) {
+    return { success: false, error: "Selecciona al menos dos hermanos." };
+  }
+
+  if (!input.sibling_subtype) {
+    return { success: false, error: "Selecciona el tipo de hermandad." };
+  }
+
+  const nullable = (val: string): string | null =>
+    val.trim() === "" ? null : val.trim();
+
+  const rows: {
+    person_a_id: string;
+    person_b_id: string;
+    type: "sibling_of";
+    parent_subtype: null;
+    spouse_subtype: null;
+    sibling_subtype: SiblingSubtype;
+    start_date: string | null;
+    end_date: string | null;
+    notes: string | null;
+  }[] = [];
+
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      rows.push({
+        person_a_id: ids[i],
+        person_b_id: ids[j],
+        type: "sibling_of",
+        parent_subtype: null,
+        spouse_subtype: null,
+        sibling_subtype: input.sibling_subtype,
+        start_date: nullable(input.start_date),
+        end_date: nullable(input.end_date),
+        notes: nullable(input.notes),
+      });
+    }
+  }
+
+  const { error } = await supabase.from("relationships").insert(rows);
+
+  if (error) {
+    console.error("[createSiblingGroup] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { success: true, id: ids[0] };
+}
+
+// ============================================================================
+// deleteRelationshipGroup — elimina varios vínculos a la vez (ej. grupo de hermanos)
+// ============================================================================
+
+export async function deleteRelationshipGroup(ids: string[]): Promise<ActionResult> {
+  if (ids.length === 0) {
+    return { success: false, error: "No hay vínculos para eliminar." };
+  }
+
+  const { error } = await supabase
+    .from("relationships")
+    .delete()
+    .in("id", ids);
+
+  if (error) {
+    console.error("[deleteRelationshipGroup] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { success: true, id: ids[0] };
+}

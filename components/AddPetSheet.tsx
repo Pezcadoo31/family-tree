@@ -341,7 +341,7 @@ function Section({
   required?: boolean;
 }) {
   return (
-    <div className="border border-surface-border rounded-xl overflow-hidden">
+    <div className="border border-surface-border rounded-xl overflow-visible">
       <button
         type="button"
         onClick={onToggle}

@@ -60,8 +60,21 @@ export function DatePicker({ value, onChange, placeholder = "Selecciona fecha" }
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Derive state directly from prop — no useEffect needed
-  const { year, month, day } = parse(value);
+  const [year, setYear] = useState(() => parse(value).year);
+  const [month, setMonth] = useState(() => parse(value).month);
+  const [day, setDay] = useState(() => parse(value).day);
+  const lastEmittedRef = useRef(value);
+
+  useEffect(() => {
+    if (value !== lastEmittedRef.current) {
+      lastEmittedRef.current = value;
+      const parsed = parse(value);
+      setYear(parsed.year);
+      setMonth(parsed.month);
+      setDay(parsed.day);
+    }
+  }, [value]);
+
   const displayLabel = buildLabel(year, month, day);
 
   // Close on outside click
@@ -76,19 +89,28 @@ export function DatePicker({ value, onChange, placeholder = "Selecciona fecha" }
   }, []);
 
   function emit(y: string, m: string, d: string) {
-    if (!y && !m) { onChange(""); return; }
+    setYear(y);
+    setMonth(m);
+    setDay(d);
+
+    let next = "";
     if (y && m && d) {
       const maxDay = daysInMonth(parseInt(m), parseInt(y));
       const safeDay = Math.min(parseInt(d), maxDay).toString().padStart(2, "0");
-      onChange(`${y}-${m.padStart(2, "0")}-${safeDay}`);
+      next = `${y}-${m.padStart(2, "0")}-${safeDay}`;
     } else if (y && m) {
-      onChange(`${y}-${m.padStart(2, "0")}-01`);
-    } else {
-      onChange("");
+      next = `${y}-${m.padStart(2, "0")}-01`;
     }
+
+    lastEmittedRef.current = next;
+    onChange(next);
   }
 
   function handleClear() {
+    setYear("");
+    setMonth("");
+    setDay("");
+    lastEmittedRef.current = "";
     onChange("");
   }
 

@@ -125,19 +125,19 @@ export function AddPersonSheet({ open, onClose }: SheetProps) {
             required
           >
             <Field label="Nombre(s)" required>
-              <Input name="given_name" value={form.given_name} onChange={handleChange} placeholder="Abdiel" required />
+              <Input name="given_name" value={form.given_name} onChange={handleChange} placeholder="Juan" required />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Apellido paterno">
-                <Input name="paternal_surname" value={form.paternal_surname} onChange={handleChange} placeholder="Vicencio" />
+                <Input name="paternal_surname" value={form.paternal_surname} onChange={handleChange} placeholder="Pérez" />
               </Field>
               <Field label="Apellido materno">
-                <Input name="maternal_surname" value={form.maternal_surname} onChange={handleChange} placeholder="Antonio" />
+                <Input name="maternal_surname" value={form.maternal_surname} onChange={handleChange} placeholder="López" />
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Apodo / Alias">
-                <Input name="nickname" value={form.nickname} onChange={handleChange} placeholder="Pez" />
+                <Input name="nickname" value={form.nickname} onChange={handleChange} placeholder="Juanito" />
               </Field>
               <Field label="Género">
                 <Select name="gender" value={form.gender} onChange={handleChange}>
@@ -175,7 +175,7 @@ export function AddPersonSheet({ open, onClose }: SheetProps) {
                 />
               </Field>
               <Field label="Lugar de nacimiento">
-                <Input name="birth_place" value={form.birth_place} onChange={handleChange} placeholder="Durango, Durango" />
+                <Input name="birth_place" value={form.birth_place} onChange={handleChange} placeholder="Guadalajara, Jalisco" />
               </Field>
             </div>
           </Section>
@@ -188,18 +188,18 @@ export function AddPersonSheet({ open, onClose }: SheetProps) {
             onToggle={() => toggleSection("personal")}
           >
             <Field label="Ocupación">
-              <Input name="occupation" value={form.occupation} onChange={handleChange} placeholder="Ingeniero en Robótica" />
+              <Input name="occupation" value={form.occupation} onChange={handleChange} placeholder="Contador Público" />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Religión">
-                <Input name="religion" value={form.religion} onChange={handleChange} placeholder="Cristiana" />
+                <Input name="religion" value={form.religion} onChange={handleChange} placeholder="Católica" />
               </Field>
               <Field label="Nacionalidad(es)">
-                <Input name="nationality" value={form.nationality} onChange={handleChange} placeholder="Mexicana, Española" />
+                <Input name="nationality" value={form.nationality} onChange={handleChange} placeholder="Mexicana, Italiana" />
               </Field>
             </div>
             <Field label="Idiomas" hint="Separados por coma">
-              <Input name="languages" value={form.languages} onChange={handleChange} placeholder="Español, Inglés" />
+              <Input name="languages" value={form.languages} onChange={handleChange} placeholder="Español, Francés" />
             </Field>
           </Section>
 
@@ -305,11 +305,13 @@ function Section({
   required?: boolean;
 }) {
   return (
-    <div className="border border-surface-border rounded-xl overflow-hidden">
+    <div className="border border-surface-border rounded-xl overflow-visible">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 bg-surface-raised hover:bg-[#1a1a25] transition-colors text-left"
+        className={`w-full flex items-center justify-between px-4 py-3 bg-surface-raised hover:bg-[#1a1a25] transition-colors text-left ${
+          open ? "rounded-t-xl" : "rounded-xl"
+        }`}
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-zinc-200">{title}</span>
@@ -325,7 +327,7 @@ function Section({
         </div>
       </button>
       {open && (
-        <div className="px-4 py-4 space-y-3 bg-[#0f0f17]">{children}</div>
+        <div className="px-4 py-4 space-y-3 bg-[#0f0f17] rounded-b-xl">{children}</div>
       )}
     </div>
   );

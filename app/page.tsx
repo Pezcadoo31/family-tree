@@ -29,6 +29,27 @@ function getInitials(person: Person): string {
   return (first + last).toUpperCase();
 }
 
+/** Groups sibling relationships that share the same created_at (same batch insert) */
+function groupRelationships<T extends { id: string; type: string; created_at: string }>(
+  relationships: T[]
+): T[][] {
+  const siblingGroups = new Map<string, T[]>();
+  const standalone: T[][] = [];
+
+  for (const rel of relationships) {
+    if (rel.type === 'sibling_of') {
+      const key = rel.created_at;
+      const group = siblingGroups.get(key) ?? [];
+      group.push(rel);
+      siblingGroups.set(key, group);
+    } else {
+      standalone.push([rel]);
+    }
+  }
+
+  return [...standalone, ...Array.from(siblingGroups.values())];
+}
+
 /** Formats a date string into a Spanish short format (e.g., "3 ene 2004") */
 function formatDateShort(date: string | null): string | null {
   if (!date) return null;
@@ -153,8 +174,8 @@ export default async function Home() {
           />
         ) : (
           <div className="space-y-2">
-            {relationships.map((rel) => (
-              <RelationshipCard key={rel.id} relationship={rel} />
+            {groupRelationships(relationships).map((group) => (
+              <RelationshipCard key={group[0].id} relationships={group} />
             ))}
           </div>
         )}
