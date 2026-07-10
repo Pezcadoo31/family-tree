@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { updatePet, type CreatePetInput } from "@/lib/actions/pets";
 import type { Species, AdoptionSourceType, Pet } from "@/lib/types";
 import { DatePicker } from "./DatePicker";
+import { EditPetRelationshipsPanel } from "./EditPetRelationshipsPanel";
+import type { Person } from "@/lib/types";
 
 // ============================================================================
 // TYPES
@@ -13,6 +15,8 @@ type SheetProps = {
   open: boolean;
   onClose: () => void;
   pet: Pet;
+  allPersons: Person[];
+  allPets: Pet[];
 };
 
 // ============================================================================
@@ -74,13 +78,14 @@ const ADOPTION_SOURCE_LABELS: Record<AdoptionSourceType, string> = {
 // MAIN COMPONENT
 // ============================================================================
 
-export function EditPetSheet({ open, onClose, pet }: SheetProps) {
+export function EditPetSheet({ open, onClose, pet, allPersons, allPets }: SheetProps) {
   const [form, setForm] = useState<CreatePetInput>(() => petToFormInput(pet));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const [openSections, setOpenSections] = useState({
     identity: true,
+    family: true,
     birth: false,
     adoption: false,
     memory: false,
@@ -186,6 +191,16 @@ export function EditPetSheet({ open, onClose, pet }: SheetProps) {
                 <option value="female">Hembra</option>
               </Select>
             </Field>
+          </Section>
+
+          {/* SECTION — Family */}
+          <Section
+            title="Familia"
+            subtitle="Personas vinculadas"
+            open={openSections.family}
+            onToggle={() => toggleSection("family")}
+          >
+            <EditPetRelationshipsPanel petId={pet.id} allPersons={allPersons} allPets={allPets} />
           </Section>
 
           {/* SECTION 2 — Birth */}

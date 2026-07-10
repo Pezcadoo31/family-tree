@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getRelationshipsForPerson, type RelationshipWithPersons } from "@/lib/actions/relationships";
-import type { Person } from "@/lib/types";
+import type { Person, Pet } from "@/lib/types";
 import { PersonProfileActions } from "@/components/PersonProfileActions";
+import { getPetRelationshipsForPerson, type PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 import { BackLink } from "@/components/BackLink";
 
 // ============================================================================
@@ -56,14 +57,17 @@ type PageProps = {
 export default async function PersonaProfile({ params }: PageProps) {
   const { id } = await params;
 
-  const [personResult, allPersonsResult, relationships] = await Promise.all([
+  const [personResult, allPersonsResult, allPetsResult, relationships, petRelationships] = await Promise.all([
     supabase.from('persons').select('*').eq('id', id).single(),
     supabase.from('persons').select('*').order('given_name'),
+    supabase.from('pets').select('*').order('name'),
     getRelationshipsForPerson(id),
+    getPetRelationshipsForPerson(id),
   ]);
 
   const person: Person | null = personResult.data;
   const allPersons: Person[] = allPersonsResult.data ?? [];
+  const allPets: Pet[] = allPetsResult.data ?? [];
 
   if (!person) {
     notFound();
@@ -92,7 +96,7 @@ export default async function PersonaProfile({ params }: PageProps) {
       {/* Back link + actions */}
       <div className="flex items-center justify-between mb-8">
         <BackLink />
-        <PersonProfileActions person={person} allPersons={allPersons} />
+        <PersonProfileActions person={person} allPersons={allPersons} allPets={allPets} />
       </div>
 
       {/* Header card */}
@@ -208,6 +212,29 @@ export default async function PersonaProfile({ params }: PageProps) {
             {siblings.length > 0 && (
               <RelationGroup label="Hermanos" relations={siblings} otherPerson={otherPerson} />
             )}
+          </div>
+        </Section>
+      )}
+
+      {/* Mascotas */}
+      {petRelationships.length > 0 && (
+        <Section title="Mascotas">
+          <div className="flex flex-wrap gap-2">
+            {petRelationships.map((rel) => {
+              if (!rel.pet) return null;
+              return (
+                <Link
+                  key={rel.id}
+                  href={`/mascota/${rel.pet.id}`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-accent/10 border border-cyan-accent/20 rounded-full text-xs text-cyan-300 hover:bg-cyan-accent/20 transition-colors"
+                >
+                  🐾 {rel.pet.name}
+                  {rel.pet.nickname && (
+                    <span style={{ fontFamily: 'var(--font-script)' }}>&quot;{rel.pet.nickname}&quot;</span>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         </Section>
       )}

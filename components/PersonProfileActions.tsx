@@ -4,14 +4,15 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { EditPersonSheet } from "./EditPersonSheet";
 import { deletePerson } from "@/lib/actions/persons";
-import type { Person } from "@/lib/types";
+import type { Person, Pet } from "@/lib/types";
 
 type Props = {
   person: Person;
   allPersons: Person[];
+  allPets: Pet[];
 };
 
-export function PersonProfileActions({ person, allPersons }: Props) {
+export function PersonProfileActions({ person, allPersons, allPets }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -70,6 +71,7 @@ export function PersonProfileActions({ person, allPersons }: Props) {
         onClose={() => setEditOpen(false)}
         person={person}
         allPersons={allPersons}
+        allPets={allPets}
       />
     </>
   );

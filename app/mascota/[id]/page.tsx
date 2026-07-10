@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import type { Pet } from "@/lib/types";
+import type { Pet, Person } from "@/lib/types";
 import { PetProfileActions } from "@/components/PetProfileActions";
+import { getPetRelationshipsForPet, type PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
+import Link from "next/link";
 import { BackLink } from "@/components/BackLink";
 
 // ============================================================================
@@ -37,6 +39,14 @@ function formatDateShort(date: string | null): string | null {
   });
 }
 
+const PET_PERSON_RELATIONSHIP_LABELS: Record<string, string> = {
+  owner: "Dueño/a",
+  primary_caregiver: "Cuidador/a principal",
+  family_pet: "Mascota familiar",
+  beloved_by: "Querido/a por",
+  adopter: "Adoptante",
+};
+
 const SPECIES_LABELS: Record<string, string> = {
   dog: "Perro",
   cat: "Gato",
@@ -61,11 +71,16 @@ type PageProps = {
 export default async function MascotaProfile({ params }: PageProps) {
   const { id } = await params;
 
-  const { data: pet }: { data: Pet | null } = await supabase
-    .from('pets')
-    .select('*')
-    .eq('id', id)
-    .single();
+  const [petResult, allPersonsResult, allPetsResult, petRelationships] = await Promise.all([
+    supabase.from('pets').select('*').eq('id', id).single(),
+    supabase.from('persons').select('*').order('given_name'),
+    supabase.from('pets').select('*').order('name'),
+    getPetRelationshipsForPet(id),
+  ]);
+
+  const pet: Pet | null = petResult.data;
+  const allPersons: Person[] = allPersonsResult.data ?? [];
+  const allPets: Pet[] = allPetsResult.data ?? [];
 
   if (!pet) {
     notFound();
@@ -81,7 +96,7 @@ export default async function MascotaProfile({ params }: PageProps) {
       {/* Back link + actions */}
       <div className="flex items-center justify-between mb-8">
         <BackLink />
-        <PetProfileActions pet={pet} />
+        <PetProfileActions pet={pet} allPersons={allPersons} allPets={allPets} />
       </div>
 
       {/* Header card */}
@@ -179,6 +194,13 @@ export default async function MascotaProfile({ params }: PageProps) {
           )}
         </Section>
       )}
+
+      {/* Familia */}
+      {petRelationships.length > 0 && (
+        <Section title="Familia">
+          <PetFamilyGroups relationships={petRelationships} />
+        </Section>
+      )}
     </main>
   );
 }
@@ -206,6 +228,42 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
     <div>
       <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">{label}</div>
       <div className="text-sm text-zinc-200">{value}</div>
+    </div>
+  );
+}
+
+function PetFamilyGroups({ relationships }: { relationships: PetRelationshipWithRefs[] }) {
+  const byType = new Map<string, PetRelationshipWithRefs[]>();
+  for (const rel of relationships) {
+    const list = byType.get(rel.relationship) ?? [];
+    list.push(rel);
+    byType.set(rel.relationship, list);
+  }
+
+  return (
+    <div className="space-y-4">
+      {Array.from(byType.entries()).map(([type, rels]) => (
+        <div key={type}>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
+            {PET_PERSON_RELATIONSHIP_LABELS[type] ?? type}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {rels.map((rel) => {
+              if (!rel.person) return null;
+              const name = [rel.person.given_name, rel.person.paternal_surname].filter(Boolean).join(' ');
+              return (
+                <Link
+                  key={rel.id}
+                  href={`/persona/${rel.person.id}`}
+                  className="px-3 py-1.5 bg-cyan-accent/10 border border-cyan-accent/20 rounded-full text-xs text-cyan-300 hover:bg-cyan-accent/20 transition-colors"
+                >
+                  {name}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

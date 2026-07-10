@@ -1,5 +1,6 @@
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
+import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 
 // ============================================================================
 // TYPES
@@ -17,21 +18,20 @@ export type TreeEdgeData = {
   id: string;
   source: string;
   target: string;
-  kind: "parent_of" | "spouse_of" | "sibling_of";
+  kind: "parent_of" | "spouse_of" | "sibling_of" | "pet_relationship";
 };
 
 export type TreeLayout = {
   nodes: { id: string; type: string; position: { x: number; y: number }; data: TreeNodeData }[];
-  edges: { id: string; source: string; target: string; type?: string; data: TreeEdgeData }[];
+  edges: { id: string; source: string; target: string; data: TreeEdgeData }[];
 };
 
 // ============================================================================
 // LAYOUT CONSTANTS
 // ============================================================================
 
-const COLUMN_WIDTH = 280;   // horizontal spacing between generations
-const ROW_HEIGHT = 140;     // vertical spacing between siblings in the same column
-const PET_COLUMN_OFFSET = 1; // pets sit one column past the last human generation
+const COLUMN_WIDTH = 280;
+const ROW_HEIGHT = 140;
 
 // ============================================================================
 // buildTreeLayout — computes generations (columns) and row positions
@@ -40,7 +40,8 @@ const PET_COLUMN_OFFSET = 1; // pets sit one column past the last human generati
 export function buildTreeLayout(
   persons: Person[],
   pets: Pet[],
-  relationships: RelationshipWithPersons[]
+  relationships: RelationshipWithPersons[],
+  petRelationships: PetRelationshipWithRefs[] = []
 ): TreeLayout {
   const parentOf = relationships.filter((r) => r.type === "parent_of");
   const spouseOf = relationships.filter((r) => r.type === "spouse_of");
@@ -48,7 +49,6 @@ export function buildTreeLayout(
 
   // --------------------------------------------------------------
   // 1) Determine generation (column) for each person via BFS from roots
-  //    Roots = persons who never appear as a child (person_b) in parent_of
   // --------------------------------------------------------------
   const childIds = new Set(parentOf.map((r) => r.person_b_id));
   const roots = persons.filter((p) => !childIds.has(p.id));
@@ -56,7 +56,6 @@ export function buildTreeLayout(
   const generation = new Map<string, number>();
   const queue: { id: string; gen: number }[] = roots.map((r) => ({ id: r.id, gen: 0 }));
 
-  // Seed roots
   for (const r of roots) generation.set(r.id, 0);
 
   while (queue.length > 0) {
@@ -72,12 +71,10 @@ export function buildTreeLayout(
     }
   }
 
-  // Anyone never touched (isolated person, no relationships) goes to generation 0
   for (const p of persons) {
     if (!generation.has(p.id)) generation.set(p.id, 0);
   }
 
-  // Spouses share the generation of their partner (whichever is already placed)
   for (const rel of spouseOf) {
     const genA = generation.get(rel.person_a_id);
     const genB = generation.get(rel.person_b_id);
@@ -85,7 +82,6 @@ export function buildTreeLayout(
     if (genB !== undefined && genA === undefined) generation.set(rel.person_a_id, genB);
   }
 
-  // Siblings share generation too, in case one wasn't linked via parent_of
   for (const rel of siblingOf) {
     const genA = generation.get(rel.person_a_id);
     const genB = generation.get(rel.person_b_id);
@@ -94,9 +90,38 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 2) Group persons by generation, assign row index within each column
+  // 2) Determine generation for pets: one column past their linked person's
+  //    generation (if linked), otherwise past the last human generation.
   // --------------------------------------------------------------
-  const maxGeneration = Math.max(0, ...Array.from(generation.values()));
+  const maxHumanGeneration = Math.max(0, ...Array.from(generation.values()));
+  const petGeneration = new Map<string, number>();
+  const petOwnerIds = new Map<string, string[]>(); // petId -> [personId, ...]
+
+  for (const petRel of petRelationships) {
+    if (!petRel.person) continue;
+    const ownerGen = generation.get(petRel.person_id);
+    const list = petOwnerIds.get(petRel.pet_id) ?? [];
+    list.push(petRel.person_id);
+    petOwnerIds.set(petRel.pet_id, list);
+
+    if (ownerGen !== undefined) {
+      const targetGen = ownerGen + 1;
+      const existing = petGeneration.get(petRel.pet_id);
+      if (existing === undefined || targetGen > existing) {
+        petGeneration.set(petRel.pet_id, targetGen);
+      }
+    }
+  }
+
+  for (const pet of pets) {
+    if (!petGeneration.has(pet.id)) {
+      petGeneration.set(pet.id, maxHumanGeneration + 1);
+    }
+  }
+
+  // --------------------------------------------------------------
+  // 3) Group persons by generation, assign row index within each column
+  // --------------------------------------------------------------
   const byGeneration = new Map<number, Person[]>();
 
   for (const p of persons) {
@@ -120,21 +145,29 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 3) Pets — placed in their own column past the last human generation,
-  //    stacked vertically. No specific owner link exists yet.
+  // 4) Group pets by their computed generation, stacked in that column
   // --------------------------------------------------------------
-  const petColumn = maxGeneration + PET_COLUMN_OFFSET;
-  pets.forEach((pet, index) => {
-    nodes.push({
-      id: `pet-${pet.id}`,
-      type: "petNode",
-      position: { x: petColumn * COLUMN_WIDTH, y: index * ROW_HEIGHT },
-      data: { id: pet.id, type: "pet", pet, generation: petColumn },
+  const petsByGeneration = new Map<number, Pet[]>();
+  for (const pet of pets) {
+    const gen = petGeneration.get(pet.id) ?? maxHumanGeneration + 1;
+    const list = petsByGeneration.get(gen) ?? [];
+    list.push(pet);
+    petsByGeneration.set(gen, list);
+  }
+
+  for (const [gen, list] of petsByGeneration.entries()) {
+    list.forEach((pet, index) => {
+      nodes.push({
+        id: `pet-${pet.id}`,
+        type: "petNode",
+        position: { x: gen * COLUMN_WIDTH, y: index * ROW_HEIGHT },
+        data: { id: pet.id, type: "pet", pet, generation: gen },
+      });
     });
-  });
+  }
 
   // --------------------------------------------------------------
-  // 4) Edges — one per relationship, styled by kind
+  // 5) Edges — relationships between persons, plus pet↔person links.
   //    For sibling_of / spouse_of (same column, stacked vertically),
   //    reorder source/target so source = the node positioned above,
   //    ensuring the connector draws a clean vertical line downward.
@@ -164,6 +197,21 @@ export function buildTreeLayout(
       data: { id: rel.id, source, target, kind: rel.type },
     };
   });
+
+  for (const petRel of petRelationships) {
+    if (!petRel.person) continue;
+    edges.push({
+      id: petRel.id,
+      source: petRel.person_id,
+      target: `pet-${petRel.pet_id}`,
+      data: {
+        id: petRel.id,
+        source: petRel.person_id,
+        target: `pet-${petRel.pet_id}`,
+        kind: "pet_relationship",
+      },
+    });
+  }
 
   return { nodes, edges };
 }

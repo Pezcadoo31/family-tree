@@ -4,13 +4,15 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { EditPetSheet } from "./EditPetSheet";
 import { deletePet } from "@/lib/actions/pets";
-import type { Pet } from "@/lib/types";
+import type { Pet, Person } from "@/lib/types";
 
 type Props = {
   pet: Pet;
+  allPersons: Person[];
+  allPets: Pet[];
 };
 
-export function PetProfileActions({ pet }: Props) {
+export function PetProfileActions({ pet, allPersons, allPets }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -68,6 +70,8 @@ export function PetProfileActions({ pet }: Props) {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         pet={pet}
+        allPersons={allPersons}
+        allPets={allPets}
       />
     </>
   );

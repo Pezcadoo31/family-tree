@@ -15,6 +15,7 @@ import { PetNode } from "./PetNode";
 import { buildTreeLayout } from "@/lib/tree/buildTreeLayout";
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
+import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 
 // ============================================================================
 // STATIC CONFIG — must live outside the component to avoid re-creation warnings
@@ -33,15 +34,16 @@ type Props = {
   persons: Person[];
   pets: Pet[];
   relationships: RelationshipWithPersons[];
+  petRelationships: PetRelationshipWithRefs[];
 };
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export function FamilyTreeView({ persons, pets, relationships }: Props) {
+export function FamilyTreeView({ persons, pets, relationships, petRelationships }: Props) {
   const { nodes, edges } = useMemo(() => {
-    const layout = buildTreeLayout(persons, pets, relationships);
+    const layout = buildTreeLayout(persons, pets, relationships, petRelationships);
 
     const flowNodes: Node[] = layout.nodes.map((n) => ({
       id: n.id,
@@ -77,20 +79,32 @@ export function FamilyTreeView({ persons, pets, relationships }: Props) {
           style: { strokeWidth: 1.5, stroke: "#71717a", strokeDasharray: "4 4" },
         };
       }
-      // sibling_of
+      if (e.data.kind === "sibling_of") {
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: "source-bottom",
+          targetHandle: "target-top",
+          type: "straight",
+          style: { strokeWidth: 1, stroke: "#52525b", strokeDasharray: "1 4" },
+        };
+      }
+
+      // pet_relationship — person owns/cares for a pet
       return {
         id: e.id,
         source: e.source,
         target: e.target,
-        sourceHandle: "source-bottom",
-        targetHandle: "target-top",
-        type: "straight",
-        style: { strokeWidth: 1, stroke: "#52525b", strokeDasharray: "1 4" },
+        sourceHandle: "source-right",
+        targetHandle: "target-left",
+        type: "smoothstep",
+        style: { strokeWidth: 1.5, stroke: "#00c2b0" },
       };
     });
 
     return { nodes: flowNodes, edges: flowEdges };
-  }, [persons, pets, relationships]);
+  }, [persons, pets, relationships, petRelationships]);
 
   return (
     <div className="w-full h-[70vh] rounded-2xl border border-surface-border bg-surface-raised overflow-hidden animate-tree-in">

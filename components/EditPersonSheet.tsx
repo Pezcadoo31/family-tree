@@ -2,9 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { updatePerson, type CreatePersonInput } from "@/lib/actions/persons";
-import type { Person } from "@/lib/types";
+import type { Person, Pet } from "@/lib/types";
 import { DatePicker } from "./DatePicker";
 import { EditRelationshipsPanel } from "./EditRelationshipsPanel";
+import { EditPersonPetsPanel } from "./EditPersonPetsPanel";
 
 // ============================================================================
 // TYPES
@@ -15,6 +16,7 @@ type SheetProps = {
   onClose: () => void;
   person: Person;
   allPersons: Person[];
+  allPets: Pet[];
 };
 
 // ============================================================================
@@ -49,7 +51,7 @@ function personToFormInput(person: Person): CreatePersonInput {
 // MAIN COMPONENT
 // ============================================================================
 
-export function EditPersonSheet({ open, onClose, person, allPersons }: SheetProps) {
+export function EditPersonSheet({ open, onClose, person, allPersons, allPets }: SheetProps) {
   const [form, setForm] = useState<CreatePersonInput>(() => personToFormInput(person));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -57,6 +59,7 @@ export function EditPersonSheet({ open, onClose, person, allPersons }: SheetProp
   const [openSections, setOpenSections] = useState({
     identity: true,
     relationships: true,
+    pets: true,
     birth: true,
     personal: false,
     history: false,
@@ -175,6 +178,16 @@ export function EditPersonSheet({ open, onClose, person, allPersons }: SheetProp
             onToggle={() => toggleSection("relationships")}
           >
             <EditRelationshipsPanel personId={person.id} allPersons={allPersons} />
+          </Section>
+
+          {/* SECTION — Pets */}
+          <Section
+            title="Mascotas"
+            subtitle="Vínculos con animales"
+            open={openSections.pets}
+            onToggle={() => toggleSection("pets")}
+          >
+            <EditPersonPetsPanel personId={person.id} allPersons={allPersons} allPets={allPets} />
           </Section>
 
           {/* SECTION 2 — Birth */}

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getRelationships } from "@/lib/actions/relationships";
+import { getAllPetRelationships } from "@/lib/actions/petRelationships";
 import { FamilyTreeView } from "@/components/tree/FamilyTreeView";
 import type { Person, Pet } from "@/lib/types";
 
@@ -9,10 +10,11 @@ import type { Person, Pet } from "@/lib/types";
 // ============================================================================
 
 export default async function ArbolPage() {
-  const [personsResult, petsResult, relationships] = await Promise.all([
+  const [personsResult, petsResult, relationships, petRelationships] = await Promise.all([
     supabase.from("persons").select("*").order("given_name"),
     supabase.from("pets").select("*").order("name"),
     getRelationships(),
+    getAllPetRelationships(),
   ]);
 
   const persons: Person[] = personsResult.data ?? [];
@@ -44,7 +46,7 @@ export default async function ArbolPage() {
           <p className="text-zinc-500 text-sm">Aún no hay personas registradas para mostrar en el árbol.</p>
         </div>
       ) : (
-        <FamilyTreeView persons={persons} pets={pets} relationships={relationships} />
+        <FamilyTreeView persons={persons} pets={pets} relationships={relationships} petRelationships={petRelationships} />
       )}
 
       {/* Legend */}
@@ -52,6 +54,7 @@ export default async function ArbolPage() {
         <LegendItem color="#a855f7" label="Padre / Hijo" />
         <LegendItem color="#71717a" label="Cónyuge" dashed />
         <LegendItem color="#52525b" label="Hermanos" dotted />
+        <LegendItem color="#00c2b0" label="Mascota" />
       </div>
     </main>
   );
