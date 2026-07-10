@@ -162,3 +162,22 @@ export async function updatePerson(
 
   return { success: true, id };
 }
+
+// ============================================================================
+// deletePerson — elimina una persona (y sus relaciones en cascada)
+// ============================================================================
+
+export async function deletePerson(id: string): Promise<ActionResult> {
+  const { error } = await supabase
+    .from("persons")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    console.error("[deletePerson] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { success: true, id };
+}

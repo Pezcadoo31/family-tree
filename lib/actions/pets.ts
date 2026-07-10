@@ -145,3 +145,22 @@ export async function updatePet(
 
   return { success: true, id };
 }
+
+// ============================================================================
+// deletePet — elimina una mascota
+// ============================================================================
+
+export async function deletePet(id: string): Promise<ActionResult> {
+  const { error } = await supabase
+    .from("pets")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    console.error("[deletePet] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { success: true, id };
+}
