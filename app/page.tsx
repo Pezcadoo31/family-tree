@@ -350,7 +350,24 @@ function PersonCard({ person }: { person: Person }) {
 }
 
 /** Pet card with cyan accent (placeholder for future use) */
+const SPECIES_LABELS: Record<string, string> = {
+  dog: "Perro",
+  cat: "Gato",
+  bird: "Ave",
+  fish: "Pez",
+  rabbit: "Conejo",
+  rodent: "Roedor",
+  reptile: "Reptil",
+  horse: "Caballo",
+  farm_animal: "Animal de granja",
+  other: "Otro",
+};
+
 function PetCard({ pet }: { pet: Pet }) {
+  const age = calculateAge(pet.birth_date);
+  const isDeceased = !!pet.death_date;
+  const speciesLabel = SPECIES_LABELS[pet.species] ?? pet.species;
+
   return (
     <Link
       href={`/mascota/${pet.id}`}
@@ -376,7 +393,14 @@ function PetCard({ pet }: { pet: Pet }) {
               </span>
             )}
           </div>
-          <div className="text-zinc-500 text-xs">{pet.species}</div>
+          <div className="text-zinc-500 text-xs mb-2">{speciesLabel}</div>
+          <div className="flex gap-1.5 flex-wrap">
+            {age !== null && (
+              <span className="px-2.5 py-0.5 bg-cyan-accent/10 border border-cyan-accent/20 rounded-full text-[11px] text-cyan-300">
+                {isDeceased ? `Vivió ${age} años` : `${age} años`}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </Link>
