@@ -67,6 +67,7 @@ export function HomeClient({ persons }: Props) {
       <AddPersonSheet
         open={personSheetOpen}
         onClose={() => setPersonSheetOpen(false)}
+        persons={persons}
       />
 
       <AddRelationshipSheet
