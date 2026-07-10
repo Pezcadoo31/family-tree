@@ -2,6 +2,9 @@ import { supabase } from '@/lib/supabase';
 import type { Person, Pet } from '@/lib/types';
 import { HomeClient } from '@/components/HomeClient';
 import { RelationshipCard } from '@/components/RelationshipCard';
+import { ParentGroupCard } from '@/components/ParentGroupCard';
+import { groupParentChildRelationships } from '@/lib/relationships/groupParentRelationships';
+import { groupRelationships } from '@/lib/relationships/groupRelationships';
 import Link from 'next/link';
 
 // ============================================================================
@@ -27,27 +30,6 @@ function getInitials(person: Person): string {
   const first = person.given_name?.[0] ?? '';
   const last = person.paternal_surname?.[0] ?? '';
   return (first + last).toUpperCase();
-}
-
-/** Groups sibling relationships that share the same created_at (same batch insert) */
-function groupRelationships<T extends { id: string; type: string; created_at: string }>(
-  relationships: T[]
-): T[][] {
-  const siblingGroups = new Map<string, T[]>();
-  const standalone: T[][] = [];
-
-  for (const rel of relationships) {
-    if (rel.type === 'sibling_of') {
-      const key = rel.created_at;
-      const group = siblingGroups.get(key) ?? [];
-      group.push(rel);
-      siblingGroups.set(key, group);
-    } else {
-      standalone.push([rel]);
-    }
-  }
-
-  return [...standalone, ...Array.from(siblingGroups.values())];
 }
 
 /** Formats a date string into a Spanish short format (e.g., "3 ene 2004") */
@@ -82,6 +64,8 @@ export default async function Home() {
   const persons: Person[] = personsResult.data ?? [];
   const pets: Pet[] = petsResult.data ?? [];
   const relationships = relationshipsResult.data ?? [];
+  const parentGroups = groupParentChildRelationships(relationships);
+  const nonParentRelationships = relationships.filter((r) => r.type !== 'parent_of');
   const error = personsResult.error ?? petsResult.error ?? relationshipsResult.error;
 
   // Error state — graceful fallback
@@ -182,7 +166,10 @@ export default async function Home() {
           />
         ) : (
           <div className="space-y-2">
-            {groupRelationships(relationships).map((group) => (
+            {parentGroups.map((group) => (
+              <ParentGroupCard key={group.children.map((c) => c.person?.id).join("-")} group={group} />
+            ))}
+            {groupRelationships(nonParentRelationships).map((group) => (
               <RelationshipCard key={group[0].id} relationships={group} />
             ))}
           </div>

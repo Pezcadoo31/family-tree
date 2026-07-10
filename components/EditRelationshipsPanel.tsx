@@ -3,7 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { getRelationshipsForPerson, type RelationshipWithPersons } from "@/lib/actions/relationships";
 import { groupRelationships } from "@/lib/relationships/groupRelationships";
+import { groupParentChildRelationships } from "@/lib/relationships/groupParentRelationships";
 import { RelationshipCard } from "./RelationshipCard";
+import { ParentGroupCard } from "./ParentGroupCard";
 import { AddRelationshipSheet } from "./AddRelationshipSheet";
 import type { Person } from "@/lib/types";
 
@@ -36,7 +38,9 @@ export function EditRelationshipsPanel({ personId, allPersons }: Props) {
     load();
   }, [load]);
 
-  const groups = groupRelationships(relationships);
+  const parentGroups = groupParentChildRelationships(relationships);
+  const nonParentRelationships = relationships.filter((r) => r.type !== "parent_of");
+  const groups = groupRelationships(nonParentRelationships);
 
   return (
     <div className="space-y-3">
@@ -53,11 +57,18 @@ export function EditRelationshipsPanel({ personId, allPersons }: Props) {
         </button>
       </div>
 
-      {!loading && groups.length === 0 && (
+      {!loading && parentGroups.length === 0 && groups.length === 0 && (
         <p className="text-xs text-zinc-600 text-center py-3">Sin vínculos registrados todavía.</p>
       )}
 
       <div className="space-y-2">
+        {parentGroups.map((group) => (
+          <ParentGroupCard
+            key={group.children.map((c) => c.person?.id).join("-")}
+            group={group}
+            onDeleted={load}
+          />
+        ))}
         {groups.map((group) => (
           <RelationshipCard key={group[0].id} relationships={group} onDeleted={load} />
         ))}

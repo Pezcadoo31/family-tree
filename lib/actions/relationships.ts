@@ -244,6 +244,26 @@ export async function createSiblingGroup(
   const nullable = (val: string): string | null =>
     val.trim() === "" ? null : val.trim();
 
+  // Buscar pares sibling_of que ya existan entre estos ids, para no duplicarlos
+  const idList = ids.join(",");
+  const { data: existing, error: fetchError } = await supabase
+    .from("relationships")
+    .select("person_a_id, person_b_id")
+    .eq("type", "sibling_of")
+    .or(`person_a_id.in.(${idList}),person_b_id.in.(${idList})`);
+
+  if (fetchError) {
+    console.error("[createSiblingGroup] Supabase fetch error:", fetchError);
+    return { success: false, error: fetchError.message };
+  }
+
+  const existingPairs = new Set(
+    (existing ?? [])
+      .filter((r) => ids.includes(r.person_a_id) && ids.includes(r.person_b_id))
+      .map((r) => [r.person_a_id, r.person_b_id].sort().join("|"))
+  );
+
+  // Generar solo los pares que aún no existen
   const rows: {
     person_a_id: string;
     person_b_id: string;
@@ -258,6 +278,8 @@ export async function createSiblingGroup(
 
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
+      const key = [ids[i], ids[j]].sort().join("|");
+      if (existingPairs.has(key)) continue;
       rows.push({
         person_a_id: ids[i],
         person_b_id: ids[j],
@@ -270,6 +292,10 @@ export async function createSiblingGroup(
         notes: nullable(input.notes),
       });
     }
+  }
+
+  if (rows.length === 0) {
+    return { success: true, id: ids[0] }; // ya estaban todos vinculados, nada que hacer
   }
 
   const { error } = await supabase.from("relationships").insert(rows);
