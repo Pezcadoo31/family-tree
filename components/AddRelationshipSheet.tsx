@@ -4,9 +4,11 @@ import { useState, useTransition } from "react";
 import {
   createRelationship,
   createSiblingGroup,
+  getRelationships,
   type CreateRelationshipInput,
   type CreateSiblingGroupInput,
 } from "@/lib/actions/relationships";
+import { groupParentChildRelationships } from "@/lib/relationships/groupParentRelationships";
 import type { Person, RelationshipType, ParentSubtype, SpouseSubtype, SiblingSubtype } from "@/lib/types";
 import { DatePicker } from "./DatePicker";
 
@@ -75,6 +77,12 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
   const [isPending, startTransition] = useTransition();
   const [startAutoFilled, setStartAutoFilled] = useState(false);
 
+  // Post-creation sibling suggestion phase
+  const [phase, setPhase] = useState<"form" | "sibling-suggestions">("form");
+  const [siblingCandidates, setSiblingCandidates] = useState<Person[]>([]);
+  const [newChildId, setNewChildId] = useState<string | null>(null);
+  const [processingCandidateId, setProcessingCandidateId] = useState<string | null>(null);
+
   // Calcula la fecha de inicio sugerida (nacimiento del más joven del grupo)
   function computeSiblingStartDate(ids: string[]): string | null {
     const birthDates = ids
@@ -83,6 +91,33 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
 
     if (birthDates.length < 2) return null;
     return birthDates.reduce((latest, d) => (d > latest ? d : latest));
+  }
+
+  /** After a parent_of link is confirmed, finds other children who now share
+   *  the exact same confirmed parent set as the new child, but don't already
+   *  have a sibling_of link with them — so the sibling group can be completed
+   *  instead of staying split across separate cards. */
+  async function findMissingSiblingsForChild(childId: string): Promise<Person[]> {
+    const all = await getRelationships();
+    const parentGroups = groupParentChildRelationships(all);
+    const group = parentGroups.find((g) => g.children.some((c) => c.person?.id === childId));
+    if (!group) return [];
+
+    const existingSiblingPairs = new Set(
+      all
+        .filter((r) => r.type === "sibling_of")
+        .map((r) => [r.person_a_id, r.person_b_id].sort().join("|"))
+    );
+
+    const missing: Person[] = [];
+    for (const c of group.children) {
+      if (!c.person || c.person.id === childId) continue;
+      const key = [c.person.id, childId].sort().join("|");
+      if (existingSiblingPairs.has(key)) continue;
+      const fullPerson = persons.find((p) => p.id === c.person!.id);
+      if (fullPerson) missing.push(fullPerson);
+    }
+    return missing;
   }
 
   function toggleSibling(id: string) {
@@ -113,24 +148,21 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
       next.sibling_subtype = value === "sibling_of" ? "full"       : "";
     }
 
+    const relevantChange = name === "type" || name === "person_a_id" || name === "person_b_id";
     let nextAutoFilled = name === "type" ? false : startAutoFilled;
 
-    const relevantChange = name === "type" || name === "person_b_id";
-    if (relevantChange && next.type === "parent_of" && (!form.start_date || startAutoFilled)) {
-      // El vínculo padre/hijo empieza cuando nace el hijo
-      const child = persons.find((p) => p.id === next.person_b_id);
-      if (child?.birth_date) {
-        next.start_date = child.birth_date;
-        nextAutoFilled = true;
+    if (relevantChange && (!form.start_date || startAutoFilled)) {
+      if (next.type === "parent_of") {
+        const child = persons.find((p) => p.id === next.person_b_id);
+        if (child?.birth_date) {
+          next.start_date = child.birth_date;
+          nextAutoFilled = true;
+        }
       }
     }
 
     setForm(next);
     setStartAutoFilled(nextAutoFilled);
-
-    if (name === "type") {
-      setSiblingIds([]);
-    }
   }
 
   function handleClose() {
@@ -138,6 +170,10 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
     setSiblingIds(presetPersonId ? [presetPersonId] : []);
     setError(null);
     setStartAutoFilled(false);
+    setPhase("form");
+    setSiblingCandidates([]);
+    setNewChildId(null);
+    setProcessingCandidateId(null);
     onClose();
   }
 
@@ -168,11 +204,41 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
       const result = await createRelationship(form);
       if (result.success) {
         onCreated?.();
+        if (form.type === "parent_of") {
+          const missing = await findMissingSiblingsForChild(form.person_b_id);
+          if (missing.length > 0) {
+            setNewChildId(form.person_b_id);
+            setSiblingCandidates(missing);
+            setPhase("sibling-suggestions");
+            return;
+          }
+        }
         handleClose();
       } else {
         setError(result.error);
       }
     });
+  }
+
+  function handleConfirmSibling(candidateId: string) {
+    if (!newChildId) return;
+    setProcessingCandidateId(candidateId);
+    startTransition(async () => {
+      await createSiblingGroup({
+        person_ids: [candidateId, newChildId],
+        sibling_subtype: "full",
+        start_date: "",
+        end_date: "",
+        notes: "",
+      });
+      setSiblingCandidates((prev) => prev.filter((p) => p.id !== candidateId));
+      setProcessingCandidateId(null);
+      onCreated?.();
+    });
+  }
+
+  function handleDismissSibling(candidateId: string) {
+    setSiblingCandidates((prev) => prev.filter((p) => p.id !== candidateId));
   }
 
   if (!open) return null;
@@ -206,8 +272,12 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-surface-border">
           <div>
-            <h2 className="text-base font-medium text-zinc-50">Nueva relación</h2>
-            <p className="text-xs text-zinc-500 mt-0.5">Vincula personas del árbol</p>
+            <h2 className="text-base font-medium text-zinc-50">
+              {phase === "form" ? "Nueva relación" : "Vínculo creado"}
+            </h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {phase === "form" ? "Vincula personas del árbol" : "Detectamos hermanos por completar"}
+            </p>
           </div>
           <button
             onClick={handleClose}
@@ -217,211 +287,281 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
           </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        {phase === "form" ? (
+          <>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
-          {/* Tipo de relación */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Tipo de relación</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["parent_of", "sibling_of", "spouse_of"] as RelationshipType[]).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() =>
-                    handleChange({
-                      target: { name: "type", value: t },
-                    } as React.ChangeEvent<HTMLSelectElement>)
-                  }
-                  className={`py-3 rounded-xl border text-xs font-medium transition-colors ${
-                    form.type === t
-                      ? "bg-violet-accent/20 border-violet-accent/50 text-violet-300"
-                      : "bg-surface-raised border-surface-border text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  {t === "parent_of"  ? "👨‍👧 Padre / Hijo" :
-                   t === "sibling_of" ? "👫 Hermanos"       :
-                                        "💑 Cónyuge"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ================== SIBLINGS: multi-select ================== */}
-          {form.type === "sibling_of" ? (
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-zinc-400">
-                Selecciona a todos los hermanos ({siblingIds.length} seleccionados)
-              </label>
-              <div className="border border-surface-border rounded-xl divide-y divide-surface-border max-h-56 overflow-y-auto">
-                {persons.map((p) => (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-raised transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={siblingIds.includes(p.id)}
-                      onChange={() => toggleSibling(p.id)}
-                      className="w-4 h-4 accent-violet-500"
-                    />
-                    <span className="text-sm text-zinc-200">
-                      {personName(p)}
-                      {p.nickname && <span className="text-violet-400"> &quot;{p.nickname}&quot;</span>}
-                    </span>
-                  </label>
-                ))}
+              {/* Tipo de relación */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-zinc-400">Tipo de relación</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["parent_of", "sibling_of", "spouse_of"] as RelationshipType[]).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() =>
+                        handleChange({
+                          target: { name: "type", value: t },
+                        } as React.ChangeEvent<HTMLSelectElement>)
+                      }
+                      className={`py-3 rounded-xl border text-xs font-medium transition-colors ${
+                        form.type === t
+                          ? "bg-violet-accent/20 border-violet-accent/50 text-violet-300"
+                          : "bg-surface-raised border-surface-border text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {t === "parent_of"  ? "👨‍👧 Padre / Hijo" :
+                       t === "sibling_of" ? "👫 Hermanos"       :
+                                            "💑 Cónyuge"}
+                    </button>
+                  ))}
+                </div>
               </div>
-              {siblingIds.length === 1 && (
-                <p className="text-[11px] text-zinc-600">Selecciona al menos otro hermano/a para vincular.</p>
+
+              {/* ================== SIBLINGS: multi-select ================== */}
+              {form.type === "sibling_of" ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-zinc-400">
+                    Selecciona a todos los hermanos ({siblingIds.length} seleccionados)
+                  </label>
+                  <div className="border border-surface-border rounded-xl divide-y divide-surface-border max-h-56 overflow-y-auto">
+                    {persons.map((p) => (
+                      <label
+                        key={p.id}
+                        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-raised transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={siblingIds.includes(p.id)}
+                          onChange={() => toggleSibling(p.id)}
+                          className="w-4 h-4 accent-violet-500"
+                        />
+                        <span className="text-sm text-zinc-200">
+                          {personName(p)}
+                          {p.nickname && <span className="text-violet-400"> &quot;{p.nickname}&quot;</span>}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {siblingIds.length === 1 && (
+                    <p className="text-[11px] text-zinc-600">Selecciona al menos otro hermano/a para vincular.</p>
+                  )}
+                </div>
+              ) : (
+                /* ================== PARENT / SPOUSE: two selects ================== */
+                <div className="space-y-3">
+                  <Field label={labelA}>
+                    <PersonSelect
+                      name="person_a_id"
+                      value={form.person_a_id}
+                      onChange={handleChange}
+                      persons={persons}
+                      exclude={form.person_b_id}
+                      placeholder={`Selecciona ${labelA.toLowerCase()}`}
+                      personName={personName}
+                    />
+                  </Field>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-surface-border" />
+                    <span className="text-xs text-zinc-600">{labelConnector}</span>
+                    <div className="flex-1 h-px bg-surface-border" />
+                  </div>
+                  <Field label={labelB}>
+                    <PersonSelect
+                      name="person_b_id"
+                      value={form.person_b_id}
+                      onChange={handleChange}
+                      persons={persons}
+                      exclude={form.person_a_id}
+                      placeholder={`Selecciona ${labelB.toLowerCase()}`}
+                      personName={personName}
+                    />
+                  </Field>
+                </div>
+              )}
+
+              {/* Subtipo */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-zinc-400">
+                  {form.type === "parent_of"  ? "Tipo de parentesco" :
+                   form.type === "sibling_of" ? "Tipo de hermandad"  :
+                                                "Estado del vínculo"}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {form.type === "parent_of" &&
+                    (Object.entries(PARENT_SUBTYPE_LABELS) as [ParentSubtype, string][]).map(
+                      ([value, label]) => (
+                        <SubtypeButton
+                          key={value}
+                          active={form.parent_subtype === value}
+                          onClick={() => setForm((prev) => ({ ...prev, parent_subtype: value, spouse_subtype: "", sibling_subtype: "" }))}
+                          label={label}
+                        />
+                      )
+                    )}
+                  {form.type === "spouse_of" &&
+                    (Object.entries(SPOUSE_SUBTYPE_LABELS) as [SpouseSubtype, string][]).map(
+                      ([value, label]) => (
+                        <SubtypeButton
+                          key={value}
+                          active={form.spouse_subtype === value}
+                          onClick={() => setForm((prev) => ({ ...prev, spouse_subtype: value, parent_subtype: "", sibling_subtype: "" }))}
+                          label={label}
+                        />
+                      )
+                    )}
+                  {form.type === "sibling_of" &&
+                    (Object.entries(SIBLING_SUBTYPE_LABELS) as [SiblingSubtype, string][]).map(
+                      ([value, label]) => (
+                        <SubtypeButton
+                          key={value}
+                          active={form.sibling_subtype === value}
+                          onClick={() => setForm((prev) => ({ ...prev, sibling_subtype: value, parent_subtype: "", spouse_subtype: "" }))}
+                          label={label}
+                        />
+                      )
+                    )}
+                </div>
+              </div>
+
+              {/* Fechas */}
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label="Fecha de inicio"
+                  hint={
+                    startAutoFilled
+                      ? form.type === "parent_of"
+                        ? "auto: nacimiento del hijo/a"
+                        : "auto: nacimiento del hermano más joven"
+                      : undefined
+                  }
+                >
+                  <DatePicker
+                    value={form.start_date}
+                    onChange={(val) => {
+                      setForm((prev) => ({ ...prev, start_date: val }));
+                      setStartAutoFilled(false);
+                    }}
+                    placeholder="Fecha de inicio"
+                  />
+                </Field>
+                <Field label="Fecha de fin">
+                  <DatePicker
+                    value={form.end_date}
+                    onChange={(val) => setForm((prev) => ({ ...prev, end_date: val }))}
+                    placeholder="Fecha de fin"
+                  />
+                </Field>
+              </div>
+
+              {/* Notas */}
+              <Field label="Notas" hint="Opcional">
+                <textarea
+                  name="notes"
+                  value={form.notes}
+                  onChange={handleChange}
+                  rows={3}
+                  placeholder="Cualquier detalle adicional..."
+                  className="w-full px-3 py-2 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-violet-accent/50 focus:ring-1 focus:ring-violet-accent/20 transition-colors resize-none"
+                />
+              </Field>
+
+              {/* Error */}
+              {error && (
+                <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                  {error}
+                </div>
               )}
             </div>
-          ) : (
-            /* ================== PARENT / SPOUSE: two selects ================== */
-            <div className="space-y-3">
-              <Field label={labelA}>
-                <PersonSelect
-                  name="person_a_id"
-                  value={form.person_a_id}
-                  onChange={handleChange}
-                  persons={persons}
-                  exclude={form.person_b_id}
-                  placeholder={`Selecciona ${labelA.toLowerCase()}`}
-                  personName={personName}
-                />
-              </Field>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-surface-border" />
-                <span className="text-xs text-zinc-600">{labelConnector}</span>
-                <div className="flex-1 h-px bg-surface-border" />
-              </div>
-              <Field label={labelB}>
-                <PersonSelect
-                  name="person_b_id"
-                  value={form.person_b_id}
-                  onChange={handleChange}
-                  persons={persons}
-                  exclude={form.person_a_id}
-                  placeholder={`Selecciona ${labelB.toLowerCase()}`}
-                  personName={personName}
-                />
-              </Field>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-surface-border flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleClose}
+                disabled={isPending}
+                className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-surface-raised transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={isPending || !canSubmit}
+                className="px-5 py-2 rounded-lg text-sm font-medium bg-violet-accent/20 border border-violet-accent/40 text-violet-300 hover:bg-violet-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isPending ? "Guardando..." : "Crear vínculo"}
+              </button>
             </div>
-          )}
+          </>
+        ) : (
+          <>
+            {/* Sibling suggestions body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
+              <p className="text-sm text-zinc-400">
+                El vínculo se creó correctamente. Encontramos personas que ahora comparten los mismos
+                padres confirmados — ¿son hermanos?
+              </p>
 
-          {/* Subtipo */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">
-              {form.type === "parent_of"  ? "Tipo de parentesco" :
-               form.type === "sibling_of" ? "Tipo de hermandad"  :
-                                            "Estado del vínculo"}
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {form.type === "parent_of" &&
-                (Object.entries(PARENT_SUBTYPE_LABELS) as [ParentSubtype, string][]).map(
-                  ([value, label]) => (
-                    <SubtypeButton
-                      key={value}
-                      active={form.parent_subtype === value}
-                      onClick={() => setForm((prev) => ({ ...prev, parent_subtype: value, spouse_subtype: "", sibling_subtype: "" }))}
-                      label={label}
-                    />
-                  )
-                )}
-              {form.type === "spouse_of" &&
-                (Object.entries(SPOUSE_SUBTYPE_LABELS) as [SpouseSubtype, string][]).map(
-                  ([value, label]) => (
-                    <SubtypeButton
-                      key={value}
-                      active={form.spouse_subtype === value}
-                      onClick={() => setForm((prev) => ({ ...prev, spouse_subtype: value, parent_subtype: "", sibling_subtype: "" }))}
-                      label={label}
-                    />
-                  )
-                )}
-              {form.type === "sibling_of" &&
-                (Object.entries(SIBLING_SUBTYPE_LABELS) as [SiblingSubtype, string][]).map(
-                  ([value, label]) => (
-                    <SubtypeButton
-                      key={value}
-                      active={form.sibling_subtype === value}
-                      onClick={() => setForm((prev) => ({ ...prev, sibling_subtype: value, parent_subtype: "", spouse_subtype: "" }))}
-                      label={label}
-                    />
-                  )
-                )}
+              {siblingCandidates.length === 0 ? (
+                <p className="text-xs text-zinc-600 text-center py-4">No quedan sugerencias pendientes.</p>
+              ) : (
+                <div className="space-y-2">
+                  {siblingCandidates.map((candidate) => {
+                    const name = personName(candidate);
+                    const isProcessing = processingCandidateId === candidate.id;
+                    return (
+                      <div
+                        key={candidate.id}
+                        className="flex items-center justify-between gap-3 px-4 py-3 bg-surface-raised border border-violet-accent/15 rounded-xl"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm text-zinc-100 truncate">
+                            {name}
+                            {candidate.nickname && (
+                              <span className="text-violet-400"> &quot;{candidate.nickname}&quot;</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-zinc-500">Comparte ambos padres confirmados</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmSibling(candidate.id)}
+                            disabled={isProcessing}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-accent/20 border border-violet-accent/40 text-violet-300 hover:bg-violet-accent/30 transition-colors disabled:opacity-50"
+                          >
+                            {isProcessing ? "..." : "Sí, vincular"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDismissSibling(candidate.id)}
+                            disabled={isProcessing}
+                            className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                          >
+                            No
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
 
-          {/* Fechas */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="Fecha de inicio"
-              hint={
-                startAutoFilled
-                  ? form.type === "parent_of"
-                    ? "auto: nacimiento del hijo/a"
-                    : "auto: nacimiento del hermano más joven"
-                  : undefined
-              }
-            >
-              <DatePicker
-                value={form.start_date}
-                onChange={(val) => {
-                  setForm((prev) => ({ ...prev, start_date: val }));
-                  setStartAutoFilled(false);
-                }}
-                placeholder="Fecha de inicio"
-              />
-            </Field>
-            <Field label="Fecha de fin">
-              <DatePicker
-                value={form.end_date}
-                onChange={(val) => setForm((prev) => ({ ...prev, end_date: val }))}
-                placeholder="Fecha de fin"
-              />
-            </Field>
-          </div>
-
-          {/* Notas */}
-          <Field label="Notas" hint="Opcional">
-            <textarea
-              name="notes"
-              value={form.notes}
-              onChange={handleChange}
-              rows={3}
-              placeholder="Cualquier detalle adicional..."
-              className="w-full px-3 py-2 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-violet-accent/50 focus:ring-1 focus:ring-violet-accent/20 transition-colors resize-none"
-            />
-          </Field>
-
-          {/* Error */}
-          {error && (
-            <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
-              {error}
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-surface-border flex items-center justify-end">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="px-5 py-2 rounded-lg text-sm font-medium bg-violet-accent/20 border border-violet-accent/40 text-violet-300 hover:bg-violet-accent/30 transition-colors"
+              >
+                Listo
+              </button>
             </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-surface-border flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={isPending}
-            className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-surface-raised transition-colors disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isPending || !canSubmit}
-            className="px-5 py-2 rounded-lg text-sm font-medium bg-violet-accent/20 border border-violet-accent/40 text-violet-300 hover:bg-violet-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isPending ? "Guardando..." : "Crear vínculo"}
-          </button>
-        </div>
+          </>
+        )}
       </div>
     </>
   );
