@@ -104,3 +104,61 @@ export async function createPerson(
 
   return { success: true, id: data.id };
 }
+
+// ============================================================================
+// updatePerson — actualiza una persona existente
+// ============================================================================
+
+export async function updatePerson(
+  id: string,
+  input: CreatePersonInput
+): Promise<ActionResult> {
+  if (!input.given_name.trim()) {
+    return { success: false, error: "El nombre es obligatorio." };
+  }
+
+  const nullable = (val: string): string | null =>
+    val.trim() === "" ? null : val.trim();
+
+  const toArray = (val: string): string[] =>
+    val
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const { error } = await supabase
+    .from("persons")
+    .update({
+      given_name:       input.given_name.trim(),
+      paternal_surname: nullable(input.paternal_surname),
+      maternal_surname: nullable(input.maternal_surname),
+      maiden_name:      nullable(input.maiden_name),
+      birth_name:       nullable(input.birth_name),
+      nickname:         nullable(input.nickname),
+      gender:           input.gender,
+      birth_date:       nullable(input.birth_date),
+      birth_place:      nullable(input.birth_place),
+      occupation:       nullable(input.occupation),
+      religion:         nullable(input.religion),
+      nationality:      toArray(input.nationality),
+      languages:        toArray(input.languages),
+      bio:              nullable(input.bio),
+      notable_quote:    nullable(input.notable_quote),
+      death_date:       nullable(input.death_date),
+      death_place:      nullable(input.death_place),
+      death_cause:      nullable(input.death_cause),
+      photo_url:        nullable(input.photo_url),
+      updated_at:       new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error("[updatePerson] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/persona/${id}`);
+
+  return { success: true, id };
+}
