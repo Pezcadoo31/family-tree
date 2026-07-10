@@ -56,12 +56,14 @@ type PageProps = {
 export default async function PersonaProfile({ params }: PageProps) {
   const { id } = await params;
 
-  const [personResult, relationships] = await Promise.all([
+  const [personResult, allPersonsResult, relationships] = await Promise.all([
     supabase.from('persons').select('*').eq('id', id).single(),
+    supabase.from('persons').select('*').order('given_name'),
     getRelationshipsForPerson(id),
   ]);
 
   const person: Person | null = personResult.data;
+  const allPersons: Person[] = allPersonsResult.data ?? [];
 
   if (!person) {
     notFound();
@@ -90,7 +92,7 @@ export default async function PersonaProfile({ params }: PageProps) {
       {/* Back link + actions */}
       <div className="flex items-center justify-between mb-8">
         <BackLink />
-        <PersonProfileActions person={person} />
+        <PersonProfileActions person={person} allPersons={allPersons} />
       </div>
 
       {/* Header card */}

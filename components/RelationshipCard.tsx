@@ -17,13 +17,14 @@ type RelationshipWithPersons = Relationship & {
 
 type Props = {
   relationships: RelationshipWithPersons[];
+  onDeleted?: () => void;
 };
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export function RelationshipCard({ relationships }: Props) {
+export function RelationshipCard({ relationships, onDeleted }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -65,6 +66,7 @@ export function RelationshipCard({ relationships }: Props) {
         await deleteRelationship(first.id);
       }
       setConfirming(false);
+      onDeleted?.();
     });
   }
 

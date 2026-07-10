@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { updatePerson, type CreatePersonInput } from "@/lib/actions/persons";
 import type { Person } from "@/lib/types";
 import { DatePicker } from "./DatePicker";
+import { EditRelationshipsPanel } from "./EditRelationshipsPanel";
 
 // ============================================================================
 // TYPES
@@ -13,6 +14,7 @@ type SheetProps = {
   open: boolean;
   onClose: () => void;
   person: Person;
+  allPersons: Person[];
 };
 
 // ============================================================================
@@ -47,13 +49,14 @@ function personToFormInput(person: Person): CreatePersonInput {
 // MAIN COMPONENT
 // ============================================================================
 
-export function EditPersonSheet({ open, onClose, person }: SheetProps) {
+export function EditPersonSheet({ open, onClose, person, allPersons }: SheetProps) {
   const [form, setForm] = useState<CreatePersonInput>(() => personToFormInput(person));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const [openSections, setOpenSections] = useState({
     identity: true,
+    relationships: true,
     birth: true,
     personal: false,
     history: false,
@@ -162,6 +165,16 @@ export function EditPersonSheet({ open, onClose, person }: SheetProps) {
                 <Input name="birth_name" value={form.birth_name} onChange={handleChange} placeholder="Si cambió de nombre" />
               </Field>
             </div>
+          </Section>
+
+          {/* SECTION — Relationships */}
+          <Section
+            title="Relaciones"
+            subtitle="Padres, pareja, hermanos"
+            open={openSections.relationships}
+            onToggle={() => toggleSection("relationships")}
+          >
+            <EditRelationshipsPanel personId={person.id} allPersons={allPersons} />
           </Section>
 
           {/* SECTION 2 — Birth */}

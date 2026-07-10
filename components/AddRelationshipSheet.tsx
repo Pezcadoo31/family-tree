@@ -18,6 +18,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   persons: Person[];
+  presetPersonId?: string;
+  onCreated?: () => void;
 };
 
 const EMPTY_FORM: CreateRelationshipInput = {
@@ -62,9 +64,13 @@ const SIBLING_SUBTYPE_LABELS: Record<SiblingSubtype, string> = {
 // MAIN COMPONENT
 // ============================================================================
 
-export function AddRelationshipSheet({ open, onClose, persons }: Props) {
-  const [form, setForm] = useState<CreateRelationshipInput>(EMPTY_FORM);
-  const [siblingIds, setSiblingIds] = useState<string[]>([]);
+export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, onCreated }: Props) {
+  const initialForm = presetPersonId
+    ? { ...EMPTY_FORM, person_a_id: presetPersonId }
+    : EMPTY_FORM;
+
+  const [form, setForm] = useState<CreateRelationshipInput>(initialForm);
+  const [siblingIds, setSiblingIds] = useState<string[]>(presetPersonId ? [presetPersonId] : []);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [startAutoFilled, setStartAutoFilled] = useState(false);
@@ -99,26 +105,37 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     const { name, value } = e.target;
+    const next: CreateRelationshipInput = { ...form, [name]: value };
 
-    setForm((prev) => {
-      const next = { ...prev, [name]: value };
-      if (name === "type") {
-        next.parent_subtype  = value === "parent_of"  ? "biological" : "";
-        next.spouse_subtype  = value === "spouse_of"  ? "married"    : "";
-        next.sibling_subtype = value === "sibling_of" ? "full"       : "";
+    if (name === "type") {
+      next.parent_subtype  = value === "parent_of"  ? "biological" : "";
+      next.spouse_subtype  = value === "spouse_of"  ? "married"    : "";
+      next.sibling_subtype = value === "sibling_of" ? "full"       : "";
+    }
+
+    let nextAutoFilled = name === "type" ? false : startAutoFilled;
+
+    const relevantChange = name === "type" || name === "person_b_id";
+    if (relevantChange && next.type === "parent_of" && (!form.start_date || startAutoFilled)) {
+      // El vínculo padre/hijo empieza cuando nace el hijo
+      const child = persons.find((p) => p.id === next.person_b_id);
+      if (child?.birth_date) {
+        next.start_date = child.birth_date;
+        nextAutoFilled = true;
       }
-      return next;
-    });
+    }
+
+    setForm(next);
+    setStartAutoFilled(nextAutoFilled);
 
     if (name === "type") {
       setSiblingIds([]);
-      setStartAutoFilled(false);
     }
   }
 
   function handleClose() {
-    setForm(EMPTY_FORM);
-    setSiblingIds([]);
+    setForm(initialForm);
+    setSiblingIds(presetPersonId ? [presetPersonId] : []);
     setError(null);
     setStartAutoFilled(false);
     onClose();
@@ -138,6 +155,7 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
       startTransition(async () => {
         const result = await createSiblingGroup(input);
         if (result.success) {
+          onCreated?.();
           handleClose();
         } else {
           setError(result.error);
@@ -149,6 +167,7 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
     startTransition(async () => {
       const result = await createRelationship(form);
       if (result.success) {
+        onCreated?.();
         handleClose();
       } else {
         setError(result.error);
@@ -338,7 +357,13 @@ export function AddRelationshipSheet({ open, onClose, persons }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <Field
               label="Fecha de inicio"
-              hint={startAutoFilled ? "auto: nacimiento del hermano más joven" : undefined}
+              hint={
+                startAutoFilled
+                  ? form.type === "parent_of"
+                    ? "auto: nacimiento del hijo/a"
+                    : "auto: nacimiento del hermano más joven"
+                  : undefined
+              }
             >
               <DatePicker
                 value={form.start_date}

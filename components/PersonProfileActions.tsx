@@ -8,9 +8,10 @@ import type { Person } from "@/lib/types";
 
 type Props = {
   person: Person;
+  allPersons: Person[];
 };
 
-export function PersonProfileActions({ person }: Props) {
+export function PersonProfileActions({ person, allPersons }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -68,6 +69,7 @@ export function PersonProfileActions({ person }: Props) {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         person={person}
+        allPersons={allPersons}
       />
     </>
   );
