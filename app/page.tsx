@@ -331,8 +331,9 @@ function PersonCard({ person }: { person: Person }) {
 /** Pet card with cyan accent (placeholder for future use) */
 function PetCard({ pet }: { pet: Pet }) {
   return (
-    <article
-      className="relative bg-surface-raised border border-cyan-accent/15 rounded-2xl p-5 overflow-hidden"
+    <Link
+      href={`/mascota/${pet.id}`}
+      className="relative block bg-surface-raised border border-cyan-accent/15 rounded-2xl p-5 overflow-hidden hover:border-cyan-accent/30 transition-colors"
     >
       <div
         className="absolute top-0 left-0 w-0.75 h-full bg-cyan-accent"
@@ -357,7 +358,7 @@ function PetCard({ pet }: { pet: Pet }) {
           <div className="text-zinc-500 text-xs">{pet.species}</div>
         </div>
       </div>
-    </article>
+    </Link>
   );
 }
 // RelationshipCard moved to components/RelationshipCard.tsx
