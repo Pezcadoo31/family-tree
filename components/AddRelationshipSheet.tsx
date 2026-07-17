@@ -327,7 +327,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
       <div className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={handleClose} />
 
       <div className="fixed top-0 right-0 h-full w-full max-w-lg z-50 flex flex-col bg-[#0f0f17] border-l border-violet-accent/20 shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-surface-border">
           <div>
             <h2 className="text-base font-medium text-zinc-50">

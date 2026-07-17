@@ -92,6 +92,22 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
 
     const flowEdges: Edge[] = layout.edges.map((e) => {
       if (e.data.kind === "parent_of") {
+        const subtype = e.data.parentSubtype ?? "biological";
+
+        const dashByParentSubtype: Record<string, string | undefined> = {
+          biological: undefined,      // solid line
+          adoptive:   "6 3",
+          step:       "2 3",
+          foster:     "1 3 5 3",
+        };
+        const colorByParentSubtype: Record<string, string> = {
+          biological: "#a855f7", // violet
+          adoptive:   "#f59e0b", // amber
+          step:       "#ec4899", // pink
+          foster:     "#38bdf8", // sky blue
+        };
+        const color = colorByParentSubtype[subtype] ?? colorByParentSubtype.biological;
+
         return {
           id: e.id,
           source: e.source,
@@ -100,7 +116,11 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           targetHandle: "target-left",
           type: "smoothstep",
           animated: true,
-          style: { strokeWidth: 1.5, stroke: "#a855f7" },
+          style: {
+            strokeWidth: 1.5,
+            stroke: color,
+            strokeDasharray: dashByParentSubtype[subtype],
+          },
         };
       }
       if (e.data.kind === "spouse_of") {

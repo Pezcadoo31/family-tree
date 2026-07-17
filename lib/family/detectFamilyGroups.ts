@@ -43,8 +43,20 @@ function mostCommonSurname(people: Person[]): string | null {
   return best;
 }
 
+/** For a childless couple, prefer the husband's paternal surname
+ *  (traditional convention) over an arbitrary tie-break. */
+function preferredParentSurname(parents: Person[]): string | null {
+  const husband = parents.find((p) => p.gender === "male" && p.paternal_surname);
+  if (husband?.paternal_surname) return husband.paternal_surname;
+  return mostCommonSurname(parents);
+}
+
 function buildGroupName(parents: Person[], children: Person[]): string {
-  const surname = mostCommonSurname(children) ?? mostCommonSurname(parents);
+  if (children.length > 0) {
+    const surname = mostCommonSurname(children);
+    if (surname) return `Familia ${surname}`;
+  }
+  const surname = preferredParentSurname(parents);
   if (surname) return `Familia ${surname}`;
   return parents.map((p) => p.given_name).join(" y ") || "Familia";
 }

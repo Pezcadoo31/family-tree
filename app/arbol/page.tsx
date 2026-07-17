@@ -59,7 +59,10 @@ export default async function ArbolPage() {
 
       {/* Legend */}
       <div className="flex items-center gap-6 mt-4 flex-wrap">
-        <LegendItem color="#a855f7" label="Padre / Hijo" />
+        <LegendItem color="#a855f7" label="Padre / Hijo · Biológico/a" />
+        <LegendItem color="#f59e0b" label="Adoptivo/a" dashed />
+        <LegendItem color="#ec4899" label="Padrastro/Madrastra" dotted />
+        <LegendItem color="#38bdf8" label="Tutor/a temporal" dotted />
         <LegendItem color="#71717a" label="Cónyuge" dashed />
         <LegendItem color="#52525b" label="Hermanos" dotted />
         <LegendItem color="#00c2b0" label="Mascota" />

@@ -21,6 +21,7 @@ export type TreeEdgeData = {
   source: string;
   target: string;
   kind: "parent_of" | "spouse_of" | "sibling_of" | "pet_relationship";
+  parentSubtype?: "biological" | "adoptive" | "step" | "foster";
 };
 
 export type TreeLayout = {
@@ -78,17 +79,27 @@ export function buildTreeLayout(
   for (const p of persons) {
     if (!generation.has(p.id)) generation.set(p.id, 0);
   }
+  // Couples and siblings must sit in the SAME column. If both already have
+  // a generation but they differ (e.g. one has confirmed parents and the
+  // other doesn't), snap both to the deeper one — not just fill in the
+  // missing side — so a spouse without registered parents doesn't get
+  // stranded in the wrong column next to unrelated people.
   for (const rel of spouseOf) {
     const genA = generation.get(rel.person_a_id);
     const genB = generation.get(rel.person_b_id);
-    if (genA !== undefined && genB === undefined) generation.set(rel.person_b_id, genA);
-    if (genB !== undefined && genA === undefined) generation.set(rel.person_a_id, genB);
+    if (genA === undefined && genB === undefined) continue;
+    const shared = Math.max(genA ?? 0, genB ?? 0);
+    generation.set(rel.person_a_id, shared);
+    generation.set(rel.person_b_id, shared);
   }
+
   for (const rel of siblingOf) {
     const genA = generation.get(rel.person_a_id);
     const genB = generation.get(rel.person_b_id);
-    if (genA !== undefined && genB === undefined) generation.set(rel.person_b_id, genA);
-    if (genB !== undefined && genA === undefined) generation.set(rel.person_a_id, genB);
+    if (genA === undefined && genB === undefined) continue;
+    const shared = Math.max(genA ?? 0, genB ?? 0);
+    generation.set(rel.person_a_id, shared);
+    generation.set(rel.person_b_id, shared);
   }
 
   // --------------------------------------------------------------
@@ -219,7 +230,29 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 6) Edges — redirected to the group node id when an endpoint is
+  // 6) Center each column vertically relative to the tallest column,
+  //    so a generation with few members (e.g. 2 parents) doesn't sit
+  //    pinned to the top next to a generation with many (e.g. 5 kids
+  //    + pets) — they align around a shared vertical center instead.
+  // --------------------------------------------------------------
+  const nodesByColumn = new Map<number, typeof nodes>();
+  for (const n of nodes) {
+    const list = nodesByColumn.get(n.position.x) ?? [];
+    list.push(n);
+    nodesByColumn.set(n.position.x, list);
+  }
+
+  const maxColumnCount = Math.max(0, ...Array.from(nodesByColumn.values()).map((l) => l.length));
+
+  for (const list of nodesByColumn.values()) {
+    const offset = ((maxColumnCount - list.length) * ROW_HEIGHT) / 2;
+    for (const n of list) {
+      n.position.y += offset;
+    }
+  }
+
+  // --------------------------------------------------------------
+  // 7) Edges — redirected to the group node id when an endpoint is
   //    collapsed; dropped entirely when both endpoints resolve to
   //    the same collapsed group (fully internal connection).
   //    For sibling_of / spouse_of (same column, stacked vertically,
@@ -251,7 +284,13 @@ export function buildTreeLayout(
       id: rel.id,
       source,
       target,
-      data: { id: rel.id, source, target, kind: rel.type },
+      data: {
+        id: rel.id,
+        source,
+        target,
+        kind: rel.type,
+        parentSubtype: rel.type === "parent_of" ? (rel.parent_subtype ?? undefined) : undefined,
+      },
     });
   }
 
