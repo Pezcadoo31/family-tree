@@ -2,6 +2,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getRelationships } from "@/lib/actions/relationships";
 import { getAllPetRelationships } from "@/lib/actions/petRelationships";
+import { detectFamilyGroups } from "@/lib/family/detectFamilyGroups";
 import { FamilyTreeView } from "@/components/tree/FamilyTreeView";
 import type { Person, Pet } from "@/lib/types";
 
@@ -19,6 +20,7 @@ export default async function ArbolPage() {
 
   const persons: Person[] = personsResult.data ?? [];
   const pets: Pet[] = petsResult.data ?? [];
+  const { groups: familyGroups } = detectFamilyGroups(persons, pets, relationships, petRelationships);
 
   return (
     <main className="min-h-screen max-w-6xl mx-auto px-6 py-12">
@@ -46,7 +48,13 @@ export default async function ArbolPage() {
           <p className="text-zinc-500 text-sm">Aún no hay personas registradas para mostrar en el árbol.</p>
         </div>
       ) : (
-        <FamilyTreeView persons={persons} pets={pets} relationships={relationships} petRelationships={petRelationships} />
+        <FamilyTreeView
+          persons={persons}
+          pets={pets}
+          relationships={relationships}
+          petRelationships={petRelationships}
+          familyGroups={familyGroups}
+        />
       )}
 
       {/* Legend */}

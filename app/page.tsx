@@ -3,8 +3,11 @@ import type { Person, Pet } from '@/lib/types';
 import { HomeClient } from '@/components/HomeClient';
 import { RelationshipCard } from '@/components/RelationshipCard';
 import { ParentGroupCard } from '@/components/ParentGroupCard';
+import { FamilyGroupCard } from '@/components/FamilyGroupCard';
 import { groupParentChildRelationships } from '@/lib/relationships/groupParentRelationships';
 import { groupRelationships } from '@/lib/relationships/groupRelationships';
+import { detectFamilyGroups } from '@/lib/family/detectFamilyGroups';
+import { getAllPetRelationships } from '@/lib/actions/petRelationships';
 import Link from 'next/link';
 
 // ============================================================================
@@ -51,7 +54,7 @@ function formatDateShort(date: string | null): string | null {
 
 export default async function Home() {
   // Fetch persons, pets y relationships en paralelo
-  const [personsResult, petsResult, relationshipsResult] = await Promise.all([
+  const [personsResult, petsResult, relationshipsResult, petRelationships] = await Promise.all([
     supabase.from('persons').select('*').order('given_name'),
     supabase.from('pets').select('*').order('name'),
     supabase.from('relationships').select(`
@@ -59,6 +62,7 @@ export default async function Home() {
       person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname),
       person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname)
     `).order('created_at', { ascending: false }),
+    getAllPetRelationships(),
   ]);
 
   const persons: Person[] = personsResult.data ?? [];
@@ -66,6 +70,11 @@ export default async function Home() {
   const relationships = relationshipsResult.data ?? [];
   const parentGroups = groupParentChildRelationships(relationships);
   const nonParentRelationships = relationships.filter((r) => r.type !== 'parent_of');
+
+  const { groups: familyGroups, groupedPersonIds, groupedPetIds } =
+    detectFamilyGroups(persons, pets, relationships, petRelationships);
+  const loosePersons = persons.filter((p) => !groupedPersonIds.has(p.id));
+  const loosePets = pets.filter((p) => !groupedPetIds.has(p.id));
   const error = personsResult.error ?? petsResult.error ?? relationshipsResult.error;
 
   // Error state — graceful fallback
@@ -144,7 +153,10 @@ export default async function Home() {
           />
         ) : (
           <div className="space-y-3">
-            {persons.map((person) => (
+            {familyGroups.map((group) => (
+              <FamilyGroupCard key={group.key} group={group} />
+            ))}
+            {loosePersons.map((person) => (
               <PersonCard key={person.id} person={person} />
             ))}
           </div>
@@ -184,14 +196,14 @@ export default async function Home() {
           title="mascotas"
           meta={`${pets.length} ${pets.length === 1 ? 'registrada' : 'registradas'}`}
         />
-        {pets.length === 0 ? (
+        {loosePets.length === 0 ? (
           <EmptyState
             accent="cyan"
-            message="Aún no hay mascotas en tu familia."
+            message="Aún no hay mascotas sueltas fuera de una familia."
           />
         ) : (
           <div className="space-y-3">
-            {pets.map((pet) => (
+            {loosePets.map((pet) => (
               <PetCard key={pet.id} pet={pet} />
             ))}
           </div>

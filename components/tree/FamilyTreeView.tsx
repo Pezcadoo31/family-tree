@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -12,18 +12,21 @@ import {
 import "@xyflow/react/dist/style.css";
 import { PersonNode } from "./PersonNode";
 import { PetNode } from "./PetNode";
+import { FamilyGroupNode } from "./FamilyGroupNode";
 import { buildTreeLayout } from "@/lib/tree/buildTreeLayout";
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
+import type { FamilyGroup } from "@/lib/family/detectFamilyGroups";
 
 // ============================================================================
-// STATIC CONFIG — must live outside the component to avoid re-creation warnings
+// STATIC CONFIG
 // ============================================================================
 
 const nodeTypes = {
   personNode: PersonNode,
   petNode: PetNode,
+  familyGroupNode: FamilyGroupNode,
 };
 
 // ============================================================================
@@ -35,25 +38,56 @@ type Props = {
   pets: Pet[];
   relationships: RelationshipWithPersons[];
   petRelationships: PetRelationshipWithRefs[];
+  familyGroups: FamilyGroup[];
 };
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export function FamilyTreeView({ persons, pets, relationships, petRelationships }: Props) {
-  const { nodes, edges } = useMemo(() => {
-    const layout = buildTreeLayout(persons, pets, relationships, petRelationships);
+export function FamilyTreeView({ persons, pets, relationships, petRelationships, familyGroups }: Props) {
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(
+    () => new Set(familyGroups.map((g) => g.key))
+  );
 
-    const flowNodes: Node[] = layout.nodes.map((n) => ({
-      id: n.id,
-      type: n.type,
-      position: n.position,
-      data:
-        n.type === "petNode"
-          ? { pet: n.data.pet, generation: n.data.generation }
-          : { person: n.data.person, generation: n.data.generation },
-    }));
+  function toggleGroup(key: string) {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const { nodes, edges } = useMemo(() => {
+    const layout = buildTreeLayout(
+      persons,
+      pets,
+      relationships,
+      petRelationships,
+      familyGroups,
+      collapsedKeys
+    );
+
+    const flowNodes: Node[] = layout.nodes.map((n) => {
+      if (n.type === "familyGroupNode") {
+        return {
+          id: n.id,
+          type: n.type,
+          position: n.position,
+          data: { group: n.data.group, onExpand: toggleGroup },
+        };
+      }
+      return {
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data:
+          n.type === "petNode"
+            ? { pet: n.data.pet, generation: n.data.generation }
+            : { person: n.data.person, generation: n.data.generation },
+      };
+    });
 
     const flowEdges: Edge[] = layout.edges.map((e) => {
       if (e.data.kind === "parent_of") {
@@ -90,8 +124,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships 
           style: { strokeWidth: 1, stroke: "#52525b", strokeDasharray: "1 4" },
         };
       }
-
-      // pet_relationship — person owns/cares for a pet
       return {
         id: e.id,
         source: e.source,
@@ -104,28 +136,52 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships 
     });
 
     return { nodes: flowNodes, edges: flowEdges };
-  }, [persons, pets, relationships, petRelationships]);
+  }, [persons, pets, relationships, petRelationships, familyGroups, collapsedKeys]);
 
   return (
-    <div className="w-full h-[70vh] rounded-2xl border border-surface-border bg-surface-raised overflow-hidden animate-tree-in">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.35, duration: 600 }}
-        minZoom={0.3}
-        maxZoom={1.5}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background color="#2a2a35" gap={24} size={1} />
-        <Controls className="!bg-surface-raised !border !border-surface-border [&>button]:!bg-surface-raised [&>button]:!border-surface-border [&>button]:!fill-zinc-400 [&>button:hover]:!bg-[#1a1a25]" />
-        <MiniMap
-          className="!bg-surface-raised !border !border-surface-border"
-          nodeColor="#a855f7"
-          maskColor="rgba(10,10,15,0.7)"
-        />
-      </ReactFlow>
+    <div className="space-y-3">
+      {familyGroups.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {familyGroups.map((g) => {
+            const isCollapsed = collapsedKeys.has(g.key);
+            return (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => toggleGroup(g.key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                  isCollapsed
+                    ? "bg-violet-accent/10 border-violet-accent/30 text-violet-300"
+                    : "bg-surface-raised border-surface-border text-zinc-400"
+                }`}
+              >
+                🏠 {g.name} {isCollapsed ? "▼" : "▲"}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="w-full h-[70vh] rounded-2xl border border-surface-border bg-surface-raised overflow-hidden animate-tree-in">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.35, duration: 600 }}
+          minZoom={0.3}
+          maxZoom={1.5}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background color="#2a2a35" gap={24} size={1} />
+          <Controls className="!bg-surface-raised !border !border-surface-border [&>button]:!bg-surface-raised [&>button]:!border-surface-border [&>button]:!fill-zinc-400 [&>button:hover]:!bg-[#1a1a25]" />
+          <MiniMap
+            className="!bg-surface-raised !border !border-surface-border"
+            nodeColor="#a855f7"
+            maskColor="rgba(10,10,15,0.7)"
+          />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

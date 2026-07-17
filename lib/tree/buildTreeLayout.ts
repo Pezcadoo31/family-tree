@@ -1,6 +1,7 @@
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
+import type { FamilyGroup } from "@/lib/family/detectFamilyGroups";
 
 // ============================================================================
 // TYPES
@@ -8,9 +9,10 @@ import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 
 export type TreeNodeData = {
   id: string;
-  type: "person" | "pet";
+  type: "person" | "pet" | "group";
   person?: Person;
   pet?: Pet;
+  group?: FamilyGroup;
   generation: number;
 };
 
@@ -34,28 +36,30 @@ const COLUMN_WIDTH = 280;
 const ROW_HEIGHT = 140;
 
 // ============================================================================
-// buildTreeLayout — computes generations (columns) and row positions
+// buildTreeLayout
 // ============================================================================
 
 export function buildTreeLayout(
   persons: Person[],
   pets: Pet[],
   relationships: RelationshipWithPersons[],
-  petRelationships: PetRelationshipWithRefs[] = []
+  petRelationships: PetRelationshipWithRefs[] = [],
+  familyGroups: FamilyGroup[] = [],
+  collapsedGroupKeys: Set<string> = new Set(),
+  onExpandGroup: (key: string) => void = () => {}
 ): TreeLayout {
   const parentOf = relationships.filter((r) => r.type === "parent_of");
   const spouseOf = relationships.filter((r) => r.type === "spouse_of");
   const siblingOf = relationships.filter((r) => r.type === "sibling_of");
 
   // --------------------------------------------------------------
-  // 1) Determine generation (column) for each person via BFS from roots
+  // 1) Generation (column) for each person, via BFS from roots
   // --------------------------------------------------------------
   const childIds = new Set(parentOf.map((r) => r.person_b_id));
   const roots = persons.filter((p) => !childIds.has(p.id));
 
   const generation = new Map<string, number>();
   const queue: { id: string; gen: number }[] = roots.map((r) => ({ id: r.id, gen: 0 }));
-
   for (const r of roots) generation.set(r.id, 0);
 
   while (queue.length > 0) {
@@ -74,14 +78,12 @@ export function buildTreeLayout(
   for (const p of persons) {
     if (!generation.has(p.id)) generation.set(p.id, 0);
   }
-
   for (const rel of spouseOf) {
     const genA = generation.get(rel.person_a_id);
     const genB = generation.get(rel.person_b_id);
     if (genA !== undefined && genB === undefined) generation.set(rel.person_b_id, genA);
     if (genB !== undefined && genA === undefined) generation.set(rel.person_a_id, genB);
   }
-
   for (const rel of siblingOf) {
     const genA = generation.get(rel.person_a_id);
     const genB = generation.get(rel.person_b_id);
@@ -90,41 +92,40 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 2) Determine generation for pets: one column past their linked person's
-  //    generation (if linked), otherwise past the last human generation.
+  // 2) Map each person/pet to the family group they belong to (if any)
   // --------------------------------------------------------------
-  const maxHumanGeneration = Math.max(0, ...Array.from(generation.values()));
-  const petGeneration = new Map<string, number>();
-  const petOwnerIds = new Map<string, string[]>(); // petId -> [personId, ...]
-
-  for (const petRel of petRelationships) {
-    if (!petRel.person) continue;
-    const ownerGen = generation.get(petRel.person_id);
-    const list = petOwnerIds.get(petRel.pet_id) ?? [];
-    list.push(petRel.person_id);
-    petOwnerIds.set(petRel.pet_id, list);
-
-    if (ownerGen !== undefined) {
-      const targetGen = ownerGen + 1;
-      const existing = petGeneration.get(petRel.pet_id);
-      if (existing === undefined || targetGen > existing) {
-        petGeneration.set(petRel.pet_id, targetGen);
-      }
-    }
+  const personToGroupKey = new Map<string, string>();
+  const petToGroupKey = new Map<string, string>();
+  for (const g of familyGroups) {
+    for (const p of [...g.parents, ...g.children]) personToGroupKey.set(p.id, g.key);
+    for (const pet of g.pets) petToGroupKey.set(pet.id, g.key);
   }
 
-  for (const pet of pets) {
-    if (!petGeneration.has(pet.id)) {
-      petGeneration.set(pet.id, maxHumanGeneration + 1);
-    }
+  function isPersonCollapsed(personId: string): boolean {
+    const key = personToGroupKey.get(personId);
+    return !!key && collapsedGroupKeys.has(key);
+  }
+  function isPetCollapsed(petId: string): boolean {
+    const key = petToGroupKey.get(petId);
+    return !!key && collapsedGroupKeys.has(key);
+  }
+  function resolvePersonNodeId(personId: string): string {
+    const key = personToGroupKey.get(personId);
+    if (key && collapsedGroupKeys.has(key)) return `group-${key}`;
+    return personId;
+  }
+  function resolvePetNodeId(petId: string): string {
+    const key = petToGroupKey.get(petId);
+    if (key && collapsedGroupKeys.has(key)) return `group-${key}`;
+    return `pet-${petId}`;
   }
 
   // --------------------------------------------------------------
-  // 3) Group persons by generation, assign row index within each column
+  // 3) Person nodes — skip individuals whose group is collapsed
   // --------------------------------------------------------------
   const byGeneration = new Map<number, Person[]>();
-
   for (const p of persons) {
+    if (isPersonCollapsed(p.id)) continue;
     const gen = generation.get(p.id) ?? 0;
     const list = byGeneration.get(gen) ?? [];
     list.push(p);
@@ -145,10 +146,58 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 4) Group pets by their computed generation, stacked in that column
+  // 4) One compact node per collapsed group, placed at its parents'
+  //    generation (falls back to the min generation among members)
   // --------------------------------------------------------------
+  const renderedGroupKeys = new Set<string>();
+
+  for (const g of familyGroups) {
+    if (!collapsedGroupKeys.has(g.key) || renderedGroupKeys.has(g.key)) continue;
+    renderedGroupKeys.add(g.key);
+
+    const members = [...g.parents, ...g.children];
+    const gens = members.map((m) => generation.get(m.id) ?? 0);
+    const anchorGen = g.parents.length > 0
+      ? Math.min(...g.parents.map((p) => generation.get(p.id) ?? 0))
+      : Math.min(...gens, 0);
+
+    const list = byGeneration.get(anchorGen) ?? [];
+    const index = list.length; // append after any loose persons already in this column
+    byGeneration.set(anchorGen, [...list, {} as Person]); // reserve the row slot
+
+    nodes.push({
+      id: `group-${g.key}`,
+      type: "familyGroupNode",
+      position: { x: anchorGen * COLUMN_WIDTH, y: index * ROW_HEIGHT },
+      data: { id: g.key, type: "group", group: g, generation: anchorGen },
+    });
+  }
+
+  // --------------------------------------------------------------
+  // 5) Pet nodes — skip pets whose group is collapsed (already
+  //    represented inside the group node)
+  // --------------------------------------------------------------
+  const maxHumanGeneration = Math.max(0, ...Array.from(generation.values()));
+  const petGeneration = new Map<string, number>();
+
+  for (const petRel of petRelationships) {
+    if (!petRel.person) continue;
+    const ownerGen = generation.get(petRel.person_id);
+    if (ownerGen !== undefined) {
+      const targetGen = ownerGen + 1;
+      const existing = petGeneration.get(petRel.pet_id);
+      if (existing === undefined || targetGen > existing) {
+        petGeneration.set(petRel.pet_id, targetGen);
+      }
+    }
+  }
+  for (const pet of pets) {
+    if (!petGeneration.has(pet.id)) petGeneration.set(pet.id, maxHumanGeneration + 1);
+  }
+
   const petsByGeneration = new Map<number, Pet[]>();
   for (const pet of pets) {
+    if (isPetCollapsed(pet.id)) continue;
     const gen = petGeneration.get(pet.id) ?? maxHumanGeneration + 1;
     const list = petsByGeneration.get(gen) ?? [];
     list.push(pet);
@@ -167,49 +216,52 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 5) Edges — relationships between persons, plus pet↔person links.
-  //    For sibling_of / spouse_of (same column, stacked vertically),
-  //    reorder source/target so source = the node positioned above,
-  //    ensuring the connector draws a clean vertical line downward.
+  // 6) Edges — redirected to the group node id when an endpoint is
+  //    collapsed; dropped entirely when both endpoints resolve to
+  //    the same collapsed group (fully internal connection).
+  //    For sibling_of / spouse_of (same column, stacked vertically,
+  //    fixed bottom→top handles), reorder source/target so source
+  //    is always the node positioned above, keeping the connector
+  //    a clean vertical line downward.
   // --------------------------------------------------------------
   const yById = new Map<string, number>();
   for (const n of nodes) {
-    if (n.type === "personNode") yById.set(n.id, n.position.y);
+    if (n.type === "personNode" || n.type === "familyGroupNode") yById.set(n.id, n.position.y);
   }
 
-  const edges: TreeLayout["edges"] = relationships.map((rel) => {
-    let source = rel.person_a_id;
-    let target = rel.person_b_id;
+  const edges: TreeLayout["edges"] = [];
+
+  for (const rel of relationships) {
+    let source = resolvePersonNodeId(rel.person_a_id);
+    let target = resolvePersonNodeId(rel.person_b_id);
+    if (source === target) continue;
 
     if (rel.type !== "parent_of") {
-      const yA = yById.get(rel.person_a_id) ?? 0;
-      const yB = yById.get(rel.person_b_id) ?? 0;
+      const yA = yById.get(source) ?? 0;
+      const yB = yById.get(target) ?? 0;
       if (yB < yA) {
-        source = rel.person_b_id;
-        target = rel.person_a_id;
+        [source, target] = [target, source];
       }
     }
 
-    return {
+    edges.push({
       id: rel.id,
       source,
       target,
       data: { id: rel.id, source, target, kind: rel.type },
-    };
-  });
+    });
+  }
 
   for (const petRel of petRelationships) {
     if (!petRel.person) continue;
+    const source = resolvePersonNodeId(petRel.person_id);
+    const target = resolvePetNodeId(petRel.pet_id);
+    if (source === target) continue;
     edges.push({
       id: petRel.id,
-      source: petRel.person_id,
-      target: `pet-${petRel.pet_id}`,
-      data: {
-        id: petRel.id,
-        source: petRel.person_id,
-        target: `pet-${petRel.pet_id}`,
-        kind: "pet_relationship",
-      },
+      source,
+      target,
+      data: { id: petRel.id, source, target, kind: "pet_relationship" },
     });
   }
 
