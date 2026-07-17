@@ -331,3 +331,115 @@ export async function deleteRelationshipGroup(ids: string[]): Promise<ActionResu
   revalidatePath("/");
   return { success: true, id: ids[0] };
 }
+
+// ============================================================================
+// updateRelationship — edita un vínculo individual (parent_of o spouse_of)
+// No permite cambiar el `type`; solo personas, subtipo, fechas y notas.
+// ============================================================================
+
+export type UpdateRelationshipInput = {
+  person_a_id: string;
+  person_b_id: string;
+  parent_subtype: ParentSubtype | "";
+  spouse_subtype: SpouseSubtype | "";
+  sibling_subtype: SiblingSubtype | "";
+  start_date: string;
+  end_date: string;
+  notes: string;
+};
+
+export async function updateRelationship(
+  id: string,
+  type: RelationshipType,
+  input: UpdateRelationshipInput
+): Promise<ActionResult> {
+  if (!input.person_a_id || !input.person_b_id) {
+    return { success: false, error: "Debes seleccionar dos personas." };
+  }
+  if (input.person_a_id === input.person_b_id) {
+    return { success: false, error: "No puedes vincular a una persona consigo misma." };
+  }
+  if (type === "parent_of" && !input.parent_subtype) {
+    return { success: false, error: "Selecciona el tipo de parentesco." };
+  }
+  if (type === "spouse_of" && !input.spouse_subtype) {
+    return { success: false, error: "Selecciona el tipo de vínculo conyugal." };
+  }
+  if (type === "sibling_of" && !input.sibling_subtype) {
+    return { success: false, error: "Selecciona el tipo de hermandad." };
+  }
+
+  const nullable = (val: string): string | null =>
+    val.trim() === "" ? null : val.trim();
+
+  const { error } = await supabase
+    .from("relationships")
+    .update({
+      person_a_id: input.person_a_id,
+      person_b_id: input.person_b_id,
+      parent_subtype: type === "parent_of" ? input.parent_subtype || null : null,
+      spouse_subtype: type === "spouse_of" ? input.spouse_subtype || null : null,
+      sibling_subtype: type === "sibling_of" ? input.sibling_subtype || null : null,
+      start_date: nullable(input.start_date),
+      end_date: nullable(input.end_date),
+      notes: nullable(input.notes),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error("[updateRelationship] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/arbol");
+  return { success: true, id };
+}
+
+// ============================================================================
+// updateSiblingGroup — edita subtipo/fechas/notas de TODAS las filas
+// de una clique de hermanos a la vez (sin tocar quién pertenece al grupo)
+// ============================================================================
+
+export type UpdateSiblingGroupInput = {
+  sibling_subtype: SiblingSubtype | "";
+  start_date: string;
+  end_date: string;
+  notes: string;
+};
+
+export async function updateSiblingGroup(
+  relationshipIds: string[],
+  input: UpdateSiblingGroupInput
+): Promise<ActionResult> {
+  if (relationshipIds.length === 0) {
+    return { success: false, error: "No hay vínculos que actualizar." };
+  }
+  if (!input.sibling_subtype) {
+    return { success: false, error: "Selecciona el tipo de hermandad." };
+  }
+
+  const nullable = (val: string): string | null =>
+    val.trim() === "" ? null : val.trim();
+
+  const { error } = await supabase
+    .from("relationships")
+    .update({
+      sibling_subtype: input.sibling_subtype,
+      start_date: nullable(input.start_date),
+      end_date: nullable(input.end_date),
+      notes: nullable(input.notes),
+      updated_at: new Date().toISOString(),
+    })
+    .in("id", relationshipIds);
+
+  if (error) {
+    console.error("[updateSiblingGroup] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/arbol");
+  return { success: true, id: relationshipIds[0] };
+}

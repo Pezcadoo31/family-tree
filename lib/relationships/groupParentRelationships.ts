@@ -13,7 +13,9 @@ export type PersonRef = {
 
 export type ParentGroupChild = {
   person: PersonRef;
-  relationshipIds: string[]; // one id per parent linking to this child
+  /** One entry per parent linking to this child — full relationship data,
+   *  needed to open the individual edit sheet (person_a_id/subtype/dates). */
+  relationships: RelationshipWithPersons[];
 };
 
 export type ParentGroup = {
@@ -23,9 +25,6 @@ export type ParentGroup = {
 
 // ============================================================================
 // groupParentChildRelationships
-// Groups parent_of relationships by the exact set of parents a child has,
-// so a couple with multiple children shows as ONE card instead of one
-// per parent-child pair.
 // ============================================================================
 
 export function groupParentChildRelationships(
@@ -33,13 +32,13 @@ export function groupParentChildRelationships(
 ): ParentGroup[] {
   const parentOf = relationships.filter((r) => r.type === "parent_of");
 
-  type ChildEntry = { person: PersonRef; parentIds: Map<string, string> }; // parentId -> relationshipId
+  type ChildEntry = { person: PersonRef; rels: Map<string, RelationshipWithPersons> }; // parentId -> relationship
   const byChild = new Map<string, ChildEntry>();
   const parentPersonById = new Map<string, PersonRef>();
 
   for (const rel of parentOf) {
-    const entry = byChild.get(rel.person_b_id) ?? { person: rel.person_b, parentIds: new Map() };
-    entry.parentIds.set(rel.person_a_id, rel.id);
+    const entry = byChild.get(rel.person_b_id) ?? { person: rel.person_b, rels: new Map() };
+    entry.rels.set(rel.person_a_id, rel);
     byChild.set(rel.person_b_id, entry);
     parentPersonById.set(rel.person_a_id, rel.person_a);
   }
@@ -47,7 +46,7 @@ export function groupParentChildRelationships(
   const byKey = new Map<string, ParentGroup>();
 
   for (const [, entry] of byChild) {
-    const parentIds = Array.from(entry.parentIds.keys()).sort();
+    const parentIds = Array.from(entry.rels.keys()).sort();
     const key = parentIds.join("|");
     const group = byKey.get(key) ?? {
       parents: parentIds.map((pid) => parentPersonById.get(pid) ?? null),
@@ -55,7 +54,7 @@ export function groupParentChildRelationships(
     };
     group.children.push({
       person: entry.person,
-      relationshipIds: Array.from(entry.parentIds.values()),
+      relationships: Array.from(entry.rels.values()),
     });
     byKey.set(key, group);
   }

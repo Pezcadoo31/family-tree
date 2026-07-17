@@ -113,7 +113,7 @@ export default async function Home() {
           >
             Ver árbol
           </Link>
-          <HomeClient persons={persons} />
+          <HomeClient persons={persons} pets={pets} />
         </div>
       </header>
 
@@ -179,10 +179,14 @@ export default async function Home() {
         ) : (
           <div className="space-y-2">
             {parentGroups.map((group) => (
-              <ParentGroupCard key={group.children.map((c) => c.person?.id).join("-")} group={group} />
+              <ParentGroupCard
+                key={group.children.map((c) => c.person?.id).join("-")}
+                group={group}
+                allPersons={persons}
+              />
             ))}
             {groupRelationships(nonParentRelationships).map((group) => (
-              <RelationshipCard key={group[0].id} relationships={group} />
+              <RelationshipCard key={group[0].id} relationships={group} allPersons={persons} />
             ))}
           </div>
         )}

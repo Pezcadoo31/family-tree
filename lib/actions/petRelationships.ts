@@ -165,3 +165,53 @@ export async function deletePetRelationship(id: string): Promise<ActionResult> {
   revalidatePath("/arbol");
   return { success: true, id };
 }
+
+// ============================================================================
+// updatePetRelationship — edita un vínculo mascota↔persona existente
+// ============================================================================
+
+export type UpdatePetRelationshipInput = {
+  pet_id: string;
+  person_id: string;
+  relationship: PetPersonRelationship;
+  start_date: string;
+  end_date: string;
+  notes: string;
+};
+
+export async function updatePetRelationship(
+  id: string,
+  input: UpdatePetRelationshipInput
+): Promise<ActionResult> {
+  if (!input.pet_id || !input.person_id) {
+    return { success: false, error: "Selecciona la mascota y la persona." };
+  }
+
+  const nullable = (val: string): string | null =>
+    val.trim() === "" ? null : val.trim();
+
+  const { error } = await supabase
+    .from("pet_relationships")
+    .update({
+      pet_id: input.pet_id,
+      person_id: input.person_id,
+      relationship: input.relationship,
+      start_date: nullable(input.start_date),
+      end_date: nullable(input.end_date),
+      notes: nullable(input.notes),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error("[updatePetRelationship] Supabase error:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/arbol");
+  revalidatePath(`/persona/${input.person_id}`);
+  revalidatePath(`/mascota/${input.pet_id}`);
+
+  return { success: true, id };
+}

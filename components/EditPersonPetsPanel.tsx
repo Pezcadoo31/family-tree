@@ -57,7 +57,7 @@ export function EditPersonPetsPanel({ personId, allPersons, allPets }: Props) {
 
       <div className="space-y-2">
         {relationships.map((rel) => (
-          <PetRelationshipCard key={rel.id} relationship={rel} onDeleted={load} />
+          <PetRelationshipCard key={rel.id} relationship={rel} allPersons={allPersons} allPets={allPets} onDeleted={load} />
         ))}
       </div>
 

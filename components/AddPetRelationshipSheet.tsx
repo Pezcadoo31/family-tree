@@ -1,13 +1,27 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createPetRelationship, type CreatePetRelationshipInput } from "@/lib/actions/petRelationships";
+import {
+  createPetRelationship,
+  updatePetRelationship,
+  type CreatePetRelationshipInput,
+} from "@/lib/actions/petRelationships";
 import type { Person, Pet, PetPersonRelationship } from "@/lib/types";
 import { DatePicker } from "./DatePicker";
 
 // ============================================================================
 // TYPES
 // ============================================================================
+
+export type EditingPetRelationship = {
+  id: string;
+  pet_id: string;
+  person_id: string;
+  relationship: PetPersonRelationship;
+  start_date: string;
+  end_date: string;
+  notes: string;
+};
 
 type Props = {
   open: boolean;
@@ -17,6 +31,7 @@ type Props = {
   presetPersonId?: string;
   presetPetId?: string;
   onCreated?: () => void;
+  editing?: EditingPetRelationship;
 };
 
 const EMPTY_FORM: CreatePetRelationshipInput = {
@@ -45,13 +60,20 @@ const RELATIONSHIP_LABELS: Record<PetPersonRelationship, string> = {
 // ============================================================================
 
 export function AddPetRelationshipSheet({
-  open, onClose, persons, pets, presetPersonId, presetPetId, onCreated,
+  open, onClose, persons, pets, presetPersonId, presetPetId, onCreated, editing,
 }: Props) {
-  const initialForm: CreatePetRelationshipInput = {
-    ...EMPTY_FORM,
-    person_id: presetPersonId ?? "",
-    pet_id: presetPetId ?? "",
-  };
+  const isEditing = !!editing;
+
+  const initialForm: CreatePetRelationshipInput = editing
+    ? {
+        pet_id: editing.pet_id,
+        person_id: editing.person_id,
+        relationship: editing.relationship,
+        start_date: editing.start_date,
+        end_date: editing.end_date,
+        notes: editing.notes,
+      }
+    : { ...EMPTY_FORM, person_id: presetPersonId ?? "", pet_id: presetPetId ?? "" };
 
   const [form, setForm] = useState<CreatePetRelationshipInput>(initialForm);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +95,10 @@ export function AddPetRelationshipSheet({
   function handleSubmit() {
     setError(null);
     startTransition(async () => {
-      const result = await createPetRelationship(form);
+      const result = isEditing
+        ? await updatePetRelationship(editing!.id, form)
+        : await createPetRelationship(form);
+
       if (result.success) {
         onCreated?.();
         handleClose();
@@ -90,16 +115,17 @@ export function AddPetRelationshipSheet({
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={handleClose} />
 
-      {/* Sheet */}
       <div className="fixed top-0 right-0 h-full w-full max-w-lg z-50 flex flex-col bg-[#0f0f17] border-l border-cyan-accent/20 shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-surface-border">
           <div>
-            <h2 className="text-base font-medium text-zinc-50">Vincular mascota</h2>
-            <p className="text-xs text-zinc-500 mt-0.5">Conecta una mascota con una persona</p>
+            <h2 className="text-base font-medium text-zinc-50">
+              {isEditing ? "Editar vínculo" : "Vincular mascota"}
+            </h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {isEditing ? "Actualiza este vínculo" : "Conecta una mascota con una persona"}
+            </p>
           </div>
           <button
             onClick={handleClose}
@@ -109,14 +135,13 @@ export function AddPetRelationshipSheet({
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           <Field label="Mascota">
             <select
               name="pet_id"
               value={form.pet_id}
               onChange={handleChange}
-              disabled={!!presetPetId}
+              disabled={!isEditing && !!presetPetId}
               className="w-full px-3 py-2 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-100 focus:outline-none focus:border-cyan-accent/50 focus:ring-1 focus:ring-cyan-accent/20 transition-colors disabled:opacity-60"
             >
               <option value="">Selecciona una mascota</option>
@@ -139,7 +164,7 @@ export function AddPetRelationshipSheet({
               name="person_id"
               value={form.person_id}
               onChange={handleChange}
-              disabled={!!presetPersonId}
+              disabled={!isEditing && !!presetPersonId}
               className="w-full px-3 py-2 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-100 focus:outline-none focus:border-cyan-accent/50 focus:ring-1 focus:ring-cyan-accent/20 transition-colors disabled:opacity-60"
             >
               <option value="">Selecciona una persona</option>
@@ -154,22 +179,20 @@ export function AddPetRelationshipSheet({
           <div className="space-y-2">
             <label className="text-xs font-medium text-zinc-400">Tipo de vínculo</label>
             <div className="grid grid-cols-2 gap-2">
-              {(Object.entries(RELATIONSHIP_LABELS) as [PetPersonRelationship, string][]).map(
-                ([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setForm((prev) => ({ ...prev, relationship: value }))}
-                    className={`py-2 px-3 rounded-lg border text-xs font-medium transition-colors text-left ${
-                      form.relationship === value
-                        ? "bg-cyan-accent/20 border-cyan-accent/50 text-cyan-300"
-                        : "bg-surface-raised border-surface-border text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                )
-              )}
+              {(Object.entries(RELATIONSHIP_LABELS) as [PetPersonRelationship, string][]).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, relationship: value }))}
+                  className={`py-2 px-3 rounded-lg border text-xs font-medium transition-colors text-left ${
+                    form.relationship === value
+                      ? "bg-cyan-accent/20 border-cyan-accent/50 text-cyan-300"
+                      : "bg-surface-raised border-surface-border text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -208,7 +231,6 @@ export function AddPetRelationshipSheet({
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-surface-border flex items-center justify-end gap-3">
           <button
             type="button"
@@ -224,7 +246,7 @@ export function AddPetRelationshipSheet({
             disabled={isPending || !canSubmit}
             className="px-5 py-2 rounded-lg text-sm font-medium bg-cyan-accent/20 border border-cyan-accent/40 text-cyan-300 hover:bg-cyan-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {isPending ? "Guardando..." : "Crear vínculo"}
+            {isPending ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear vínculo"}
           </button>
         </div>
       </div>

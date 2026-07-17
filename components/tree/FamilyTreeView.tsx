@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
+  useReactFlow,
   type Node,
   type Edge,
 } from "@xyflow/react";
@@ -130,7 +131,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         target: e.target,
         sourceHandle: "source-right",
         targetHandle: "target-left",
-        type: "smoothstep",
+        type: "default",
         style: { strokeWidth: 1.5, stroke: "#00c2b0" },
       };
     });
@@ -173,6 +174,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           maxZoom={1.5}
           proOptions={{ hideAttribution: true }}
         >
+          <FitViewOnGroupToggle trigger={collapsedKeys} />
           <Background color="#2a2a35" gap={24} size={1} />
           <Controls className="!bg-surface-raised !border !border-surface-border [&>button]:!bg-surface-raised [&>button]:!border-surface-border [&>button]:!fill-zinc-400 [&>button:hover]:!bg-[#1a1a25]" />
           <MiniMap
@@ -184,4 +186,20 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       </div>
     </div>
   );
+}
+
+// ============================================================================
+// FitViewOnGroupToggle — re-runs fitView whenever a group is expanded or
+// collapsed, since React Flow's `fitView` prop only applies on first mount.
+// ============================================================================
+
+function FitViewOnGroupToggle({ trigger }: { trigger: Set<string> }) {
+  const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    fitView({ padding: 0.35, duration: 400 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger]);
+
+  return null;
 }

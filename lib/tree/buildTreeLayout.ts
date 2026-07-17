@@ -205,11 +205,14 @@ export function buildTreeLayout(
   }
 
   for (const [gen, list] of petsByGeneration.entries()) {
+    // Continue the row count from wherever persons/groups already left off
+    // in this same column, instead of restarting at 0 and colliding.
+    const baseOffset = byGeneration.get(gen)?.length ?? 0;
     list.forEach((pet, index) => {
       nodes.push({
         id: `pet-${pet.id}`,
         type: "petNode",
-        position: { x: gen * COLUMN_WIDTH, y: index * ROW_HEIGHT },
+        position: { x: gen * COLUMN_WIDTH, y: (baseOffset + index) * ROW_HEIGHT },
         data: { id: pet.id, type: "pet", pet, generation: gen },
       });
     });

@@ -66,11 +66,12 @@ export function EditRelationshipsPanel({ personId, allPersons }: Props) {
           <ParentGroupCard
             key={group.children.map((c) => c.person?.id).join("-")}
             group={group}
+            allPersons={allPersons}
             onDeleted={load}
           />
         ))}
         {groups.map((group) => (
-          <RelationshipCard key={group[0].id} relationships={group} onDeleted={load} />
+          <RelationshipCard key={group[0].id} relationships={group} allPersons={allPersons} onDeleted={load} />
         ))}
       </div>
 

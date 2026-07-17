@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import {
   createRelationship,
   createSiblingGroup,
+  updateRelationship,
   getRelationships,
   type CreateRelationshipInput,
   type CreateSiblingGroupInput,
@@ -16,12 +17,26 @@ import { DatePicker } from "./DatePicker";
 // TYPES
 // ============================================================================
 
+export type EditingRelationship = {
+  id: string;
+  type: "parent_of" | "spouse_of" | "sibling_of";
+  person_a_id: string;
+  person_b_id: string;
+  parent_subtype: ParentSubtype | "";
+  spouse_subtype: SpouseSubtype | "";
+  sibling_subtype: SiblingSubtype | "";
+  start_date: string;
+  end_date: string;
+  notes: string;
+};
+
 type Props = {
   open: boolean;
   onClose: () => void;
   persons: Person[];
   presetPersonId?: string;
   onCreated?: () => void;
+  editing?: EditingRelationship;
 };
 
 const EMPTY_FORM: CreateRelationshipInput = {
@@ -62,28 +77,52 @@ const SIBLING_SUBTYPE_LABELS: Record<SiblingSubtype, string> = {
   adoptive: "Hermanos adoptivos",
 };
 
+const TYPE_LABEL: Record<"parent_of" | "spouse_of" | "sibling_of", string> = {
+  parent_of: "👨‍👧 Padre / Hijo",
+  spouse_of: "💑 Cónyuge",
+  sibling_of: "👫 Hermanos",
+};
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
-export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, onCreated }: Props) {
-  const initialForm = presetPersonId
-    ? { ...EMPTY_FORM, person_a_id: presetPersonId }
-    : EMPTY_FORM;
+export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, onCreated, editing }: Props) {
+  const isEditing = !!editing;
+
+  function computeInitialForm(): CreateRelationshipInput {
+    if (editing) {
+      return {
+        person_a_id: editing.person_a_id,
+        person_b_id: editing.person_b_id,
+        type: editing.type,
+        parent_subtype: editing.parent_subtype,
+        spouse_subtype: editing.spouse_subtype,
+        sibling_subtype: editing.sibling_subtype,
+        start_date: editing.start_date,
+        end_date: editing.end_date,
+        notes: editing.notes,
+      };
+    }
+    return presetPersonId ? { ...EMPTY_FORM, person_a_id: presetPersonId } : EMPTY_FORM;
+  }
+
+  const initialForm = computeInitialForm();
 
   const [form, setForm] = useState<CreateRelationshipInput>(initialForm);
-  const [siblingIds, setSiblingIds] = useState<string[]>(presetPersonId ? [presetPersonId] : []);
+  const [siblingIds, setSiblingIds] = useState<string[]>(
+    !isEditing && presetPersonId ? [presetPersonId] : []
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [startAutoFilled, setStartAutoFilled] = useState(false);
 
-  // Post-creation sibling suggestion phase
+  // Post-creation sibling suggestion phase (only relevant when creating)
   const [phase, setPhase] = useState<"form" | "sibling-suggestions">("form");
   const [siblingCandidates, setSiblingCandidates] = useState<Person[]>([]);
   const [newChildId, setNewChildId] = useState<string | null>(null);
   const [processingCandidateId, setProcessingCandidateId] = useState<string | null>(null);
 
-  // Calcula la fecha de inicio sugerida (nacimiento del más joven del grupo)
   function computeSiblingStartDate(ids: string[]): string | null {
     const birthDates = ids
       .map((id) => persons.find((p) => p.id === id)?.birth_date)
@@ -93,10 +132,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
     return birthDates.reduce((latest, d) => (d > latest ? d : latest));
   }
 
-  /** After a parent_of link is confirmed, finds other children who now share
-   *  the exact same confirmed parent set as the new child, but don't already
-   *  have a sibling_of link with them — so the sibling group can be completed
-   *  instead of staying split across separate cards. */
   async function findMissingSiblingsForChild(childId: string): Promise<Person[]> {
     const all = await getRelationships();
     const parentGroups = groupParentChildRelationships(all);
@@ -123,7 +158,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
   function toggleSibling(id: string) {
     setSiblingIds((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-
       if (!form.start_date || startAutoFilled) {
         const suggested = computeSiblingStartDate(next);
         if (suggested) {
@@ -131,7 +165,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
           setStartAutoFilled(true);
         }
       }
-
       return next;
     });
   }
@@ -142,7 +175,7 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
     const { name, value } = e.target;
     const next: CreateRelationshipInput = { ...form, [name]: value };
 
-    if (name === "type") {
+    if (name === "type" && !isEditing) {
       next.parent_subtype  = value === "parent_of"  ? "biological" : "";
       next.spouse_subtype  = value === "spouse_of"  ? "married"    : "";
       next.sibling_subtype = value === "sibling_of" ? "full"       : "";
@@ -151,7 +184,7 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
     const relevantChange = name === "type" || name === "person_a_id" || name === "person_b_id";
     let nextAutoFilled = name === "type" ? false : startAutoFilled;
 
-    if (relevantChange && (!form.start_date || startAutoFilled)) {
+    if (!isEditing && relevantChange && (!form.start_date || startAutoFilled)) {
       if (next.type === "parent_of") {
         const child = persons.find((p) => p.id === next.person_b_id);
         if (child?.birth_date) {
@@ -167,7 +200,7 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
 
   function handleClose() {
     setForm(initialForm);
-    setSiblingIds(presetPersonId ? [presetPersonId] : []);
+    setSiblingIds(!isEditing && presetPersonId ? [presetPersonId] : []);
     setError(null);
     setStartAutoFilled(false);
     setPhase("form");
@@ -179,6 +212,28 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
 
   function handleSubmit() {
     setError(null);
+
+    if (isEditing && editing) {
+      startTransition(async () => {
+        const result = await updateRelationship(editing.id, editing.type, {
+          person_a_id: form.person_a_id,
+          person_b_id: form.person_b_id,
+          parent_subtype: form.parent_subtype,
+          spouse_subtype: form.spouse_subtype,
+          sibling_subtype: form.sibling_subtype,
+          start_date: form.start_date,
+          end_date: form.end_date,
+          notes: form.notes,
+        });
+        if (result.success) {
+          onCreated?.();
+          handleClose();
+        } else {
+          setError(result.error);
+        }
+      });
+      return;
+    }
 
     if (form.type === "sibling_of") {
       const input: CreateSiblingGroupInput = {
@@ -243,40 +298,47 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
 
   if (!open) return null;
 
-  const personName = (p: Person) =>
-    [p.given_name, p.paternal_surname].filter(Boolean).join(" ");
+  const personName = (p: Person) => [p.given_name, p.paternal_surname].filter(Boolean).join(" ");
 
-  const canSubmit =
-    form.type === "sibling_of"
+  function subtypeOk(): boolean {
+    if (form.type === "parent_of") return !!form.parent_subtype;
+    if (form.type === "spouse_of") return !!form.spouse_subtype;
+    return !!form.sibling_subtype; // sibling_of
+  }
+
+  const canSubmit = isEditing
+    ? !!form.person_a_id && !!form.person_b_id && form.person_a_id !== form.person_b_id && subtypeOk()
+    : form.type === "sibling_of"
       ? siblingIds.length >= 2 && !!form.sibling_subtype
-      : !!form.person_a_id &&
-        !!form.person_b_id &&
-        form.person_a_id !== form.person_b_id &&
-        (form.type === "parent_of" ? !!form.parent_subtype : !!form.spouse_subtype);
+      : !!form.person_a_id && !!form.person_b_id && form.person_a_id !== form.person_b_id && subtypeOk();
 
-  const labelA = form.type === "parent_of" ? "Padre / Madre" : "Persona A";
-  const labelB = form.type === "parent_of" ? "Hijo / Hija" : "Persona B";
-  const labelConnector = form.type === "parent_of" ? "es padre/madre de" : "está vinculado/a con";
+  const labelA =
+    form.type === "parent_of"  ? "Padre / Madre" :
+    form.type === "sibling_of" ? "Hermano/a A"   : "Persona A";
+  const labelB =
+    form.type === "parent_of"  ? "Hijo / Hija"   :
+    form.type === "sibling_of" ? "Hermano/a B"   : "Persona B";
+  const labelConnector =
+    form.type === "parent_of"  ? "es padre/madre de" :
+    form.type === "sibling_of" ? "es hermano/a de"    : "está vinculado/a con";
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm"
-        onClick={handleClose}
-      />
+      <div className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={handleClose} />
 
-      {/* Sheet */}
       <div className="fixed top-0 right-0 h-full w-full max-w-lg z-50 flex flex-col bg-[#0f0f17] border-l border-violet-accent/20 shadow-2xl overflow-hidden">
-
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-surface-border">
           <div>
             <h2 className="text-base font-medium text-zinc-50">
-              {phase === "form" ? "Nueva relación" : "Vínculo creado"}
+              {phase !== "form" ? "Vínculo creado" : isEditing ? "Editar relación" : "Nueva relación"}
             </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              {phase === "form" ? "Vincula personas del árbol" : "Detectamos hermanos por completar"}
+              {phase !== "form"
+                ? "Detectamos hermanos por completar"
+                : isEditing
+                  ? "Actualiza este vínculo"
+                  : "Vincula personas del árbol"}
             </p>
           </div>
           <button
@@ -289,48 +351,48 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
 
         {phase === "form" ? (
           <>
-            {/* Body */}
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
               {/* Tipo de relación */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-zinc-400">Tipo de relación</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["parent_of", "sibling_of", "spouse_of"] as RelationshipType[]).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() =>
-                        handleChange({
-                          target: { name: "type", value: t },
-                        } as React.ChangeEvent<HTMLSelectElement>)
-                      }
-                      className={`py-3 rounded-xl border text-xs font-medium transition-colors ${
-                        form.type === t
-                          ? "bg-violet-accent/20 border-violet-accent/50 text-violet-300"
-                          : "bg-surface-raised border-surface-border text-zinc-400 hover:text-zinc-200"
-                      }`}
-                    >
-                      {t === "parent_of"  ? "👨‍👧 Padre / Hijo" :
-                       t === "sibling_of" ? "👫 Hermanos"       :
-                                            "💑 Cónyuge"}
-                    </button>
-                  ))}
+              {isEditing ? (
+                <div className="px-3 py-2.5 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-300">
+                  {TYPE_LABEL[editing!.type]}
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-zinc-400">Tipo de relación</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["parent_of", "sibling_of", "spouse_of"] as RelationshipType[]).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() =>
+                          handleChange({ target: { name: "type", value: t } } as React.ChangeEvent<HTMLSelectElement>)
+                        }
+                        className={`py-3 rounded-xl border text-xs font-medium transition-colors ${
+                          form.type === t
+                            ? "bg-violet-accent/20 border-violet-accent/50 text-violet-300"
+                            : "bg-surface-raised border-surface-border text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {t === "parent_of"  ? "👨‍👧 Padre / Hijo" :
+                         t === "sibling_of" ? "👫 Hermanos"       :
+                                              "💑 Cónyuge"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-              {/* ================== SIBLINGS: multi-select ================== */}
-              {form.type === "sibling_of" ? (
+              {/* Personas */}
+              {form.type === "sibling_of" && !isEditing ? (
                 <div className="space-y-2">
                   <label className="text-xs font-medium text-zinc-400">
                     Selecciona a todos los hermanos ({siblingIds.length} seleccionados)
                   </label>
                   <div className="border border-surface-border rounded-xl divide-y divide-surface-border max-h-56 overflow-y-auto">
                     {persons.map((p) => (
-                      <label
-                        key={p.id}
-                        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-raised transition-colors"
-                      >
+                      <label key={p.id} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-raised transition-colors">
                         <input
                           type="checkbox"
                           checked={siblingIds.includes(p.id)}
@@ -349,7 +411,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                   )}
                 </div>
               ) : (
-                /* ================== PARENT / SPOUSE: two selects ================== */
                 <div className="space-y-3">
                   <Field label={labelA}>
                     <PersonSelect
@@ -390,38 +451,32 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {form.type === "parent_of" &&
-                    (Object.entries(PARENT_SUBTYPE_LABELS) as [ParentSubtype, string][]).map(
-                      ([value, label]) => (
-                        <SubtypeButton
-                          key={value}
-                          active={form.parent_subtype === value}
-                          onClick={() => setForm((prev) => ({ ...prev, parent_subtype: value, spouse_subtype: "", sibling_subtype: "" }))}
-                          label={label}
-                        />
-                      )
-                    )}
+                    (Object.entries(PARENT_SUBTYPE_LABELS) as [ParentSubtype, string][]).map(([value, label]) => (
+                      <SubtypeButton
+                        key={value}
+                        active={form.parent_subtype === value}
+                        onClick={() => setForm((prev) => ({ ...prev, parent_subtype: value, spouse_subtype: "", sibling_subtype: "" }))}
+                        label={label}
+                      />
+                    ))}
                   {form.type === "spouse_of" &&
-                    (Object.entries(SPOUSE_SUBTYPE_LABELS) as [SpouseSubtype, string][]).map(
-                      ([value, label]) => (
-                        <SubtypeButton
-                          key={value}
-                          active={form.spouse_subtype === value}
-                          onClick={() => setForm((prev) => ({ ...prev, spouse_subtype: value, parent_subtype: "", sibling_subtype: "" }))}
-                          label={label}
-                        />
-                      )
-                    )}
+                    (Object.entries(SPOUSE_SUBTYPE_LABELS) as [SpouseSubtype, string][]).map(([value, label]) => (
+                      <SubtypeButton
+                        key={value}
+                        active={form.spouse_subtype === value}
+                        onClick={() => setForm((prev) => ({ ...prev, spouse_subtype: value, parent_subtype: "", sibling_subtype: "" }))}
+                        label={label}
+                      />
+                    ))}
                   {form.type === "sibling_of" &&
-                    (Object.entries(SIBLING_SUBTYPE_LABELS) as [SiblingSubtype, string][]).map(
-                      ([value, label]) => (
-                        <SubtypeButton
-                          key={value}
-                          active={form.sibling_subtype === value}
-                          onClick={() => setForm((prev) => ({ ...prev, sibling_subtype: value, parent_subtype: "", spouse_subtype: "" }))}
-                          label={label}
-                        />
-                      )
-                    )}
+                    (Object.entries(SIBLING_SUBTYPE_LABELS) as [SiblingSubtype, string][]).map(([value, label]) => (
+                      <SubtypeButton
+                        key={value}
+                        active={form.sibling_subtype === value}
+                        onClick={() => setForm((prev) => ({ ...prev, sibling_subtype: value, parent_subtype: "", spouse_subtype: "" }))}
+                        label={label}
+                      />
+                    ))}
                 </div>
               </div>
 
@@ -431,9 +486,7 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                   label="Fecha de inicio"
                   hint={
                     startAutoFilled
-                      ? form.type === "parent_of"
-                        ? "auto: nacimiento del hijo/a"
-                        : "auto: nacimiento del hermano más joven"
+                      ? form.type === "parent_of" ? "auto: nacimiento del hijo/a" : "auto: nacimiento del hermano más joven"
                       : undefined
                   }
                 >
@@ -455,7 +508,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                 </Field>
               </div>
 
-              {/* Notas */}
               <Field label="Notas" hint="Opcional">
                 <textarea
                   name="notes"
@@ -467,7 +519,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                 />
               </Field>
 
-              {/* Error */}
               {error && (
                 <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
                   {error}
@@ -475,7 +526,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
               )}
             </div>
 
-            {/* Footer */}
             <div className="px-6 py-4 border-t border-surface-border flex items-center justify-end gap-3">
               <button
                 type="button"
@@ -491,13 +541,12 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                 disabled={isPending || !canSubmit}
                 className="px-5 py-2 rounded-lg text-sm font-medium bg-violet-accent/20 border border-violet-accent/40 text-violet-300 hover:bg-violet-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {isPending ? "Guardando..." : "Crear vínculo"}
+                {isPending ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear vínculo"}
               </button>
             </div>
           </>
         ) : (
           <>
-            {/* Sibling suggestions body */}
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
               <p className="text-sm text-zinc-400">
                 El vínculo se creó correctamente. Encontramos personas que ahora comparten los mismos
@@ -512,16 +561,11 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
                     const name = personName(candidate);
                     const isProcessing = processingCandidateId === candidate.id;
                     return (
-                      <div
-                        key={candidate.id}
-                        className="flex items-center justify-between gap-3 px-4 py-3 bg-surface-raised border border-violet-accent/15 rounded-xl"
-                      >
+                      <div key={candidate.id} className="flex items-center justify-between gap-3 px-4 py-3 bg-surface-raised border border-violet-accent/15 rounded-xl">
                         <div className="min-w-0">
                           <p className="text-sm text-zinc-100 truncate">
                             {name}
-                            {candidate.nickname && (
-                              <span className="text-violet-400"> &quot;{candidate.nickname}&quot;</span>
-                            )}
+                            {candidate.nickname && <span className="text-violet-400"> &quot;{candidate.nickname}&quot;</span>}
                           </p>
                           <p className="text-xs text-zinc-500">Comparte ambos padres confirmados</p>
                         </div>
@@ -550,7 +594,6 @@ export function AddRelationshipSheet({ open, onClose, persons, presetPersonId, o
               )}
             </div>
 
-            {/* Footer */}
             <div className="px-6 py-4 border-t border-surface-border flex items-center justify-end">
               <button
                 type="button"
@@ -600,13 +643,11 @@ function PersonSelect({ name, value, onChange, persons, exclude, placeholder, pe
       className="w-full px-3 py-2 bg-surface-raised border border-surface-border rounded-lg text-sm text-zinc-100 focus:outline-none focus:border-violet-accent/50 focus:ring-1 focus:ring-violet-accent/20 transition-colors"
     >
       <option value="">{placeholder}</option>
-      {persons
-        .filter((p) => p.id !== exclude)
-        .map((p) => (
-          <option key={p.id} value={p.id}>
-            {personName(p)}{p.nickname ? ` "${p.nickname}"` : ""}
-          </option>
-        ))}
+      {persons.filter((p) => p.id !== exclude).map((p) => (
+        <option key={p.id} value={p.id}>
+          {personName(p)}{p.nickname ? ` "${p.nickname}"` : ""}
+        </option>
+      ))}
     </select>
   );
 }
