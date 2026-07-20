@@ -129,8 +129,13 @@ export function detectFamilyGroups(
   }
 
   // --------------------------------------------------------------
-  // 3) Attach pets — a pet joins the first group where its linked
-  //    person (owner, caregiver, etc.) is a parent or a child
+  // 3) Attach pets — pinned ONCE to a single group, deterministically,
+  //    based purely on the owner's role (never re-evaluated by dates,
+  //    expand/collapse state, or anything else). An owner can appear in
+  //    two groups (e.g. a child in their family of origin AND a parent
+  //    in their own household) — the pet belongs to the household the
+  //    owner actually formed (parent role), falling back to their
+  //    family of origin only when they don't have one of their own yet.
   // --------------------------------------------------------------
   const petById = new Map(pets.map((p) => [p.id, p]));
   const assignedPetIds = new Set<string>();
@@ -140,11 +145,9 @@ export function detectFamilyGroups(
     const pet = petById.get(petRel.pet_id);
     if (!pet) continue;
 
-    const group = groups.find(
-      (g) =>
-        g.parents.some((p) => p.id === petRel.person_id) ||
-        g.children.some((c) => c.id === petRel.person_id)
-    );
+    const ownFamilyGroup = groups.find((g) => g.parents.some((p) => p.id === petRel.person_id));
+    const originFamilyGroup = groups.find((g) => g.children.some((c) => c.id === petRel.person_id));
+    const group = ownFamilyGroup ?? originFamilyGroup;
 
     if (group) {
       group.pets.push(pet);
