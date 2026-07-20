@@ -148,7 +148,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: e.target,
           sourceHandle: "source-bottom",
           targetHandle: "target-top",
-          type: "straight",
+          type: "smoothstep",
+          pathOptions: { borderRadius: 8 },
           style: { strokeWidth: 1.5, stroke: "#71717a", strokeDasharray: "4 4" },
         };
       }
@@ -159,7 +160,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: e.target,
           sourceHandle: "source-bottom",
           targetHandle: "target-top",
-          type: "straight",
+          type: "smoothstep",
+          pathOptions: { borderRadius: 8 },
           style: { strokeWidth: 1, stroke: "#52525b", strokeDasharray: "1 4" },
         };
       }
@@ -169,7 +171,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         target: e.target,
         sourceHandle: "source-right",
         targetHandle: "target-left",
-        type: "default",
+        type: "smoothstep",
+        pathOptions: { borderRadius: 8 },
         style: { strokeWidth: 1.5, stroke: "#00c2b0" },
       };
     });
