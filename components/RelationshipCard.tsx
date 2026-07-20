@@ -53,6 +53,16 @@ export function RelationshipCard({ relationships, allPersons, onDeleted }: Props
     return Array.from(map.values());
   })();
 
+  // First relationship in the group that involves this person — a
+  // reasonable single answer even though subtype is stored per pair,
+  // since in practice every relationship a person gets in this clique is
+  // created in one bulk action (adding them as a sibling to everyone
+  // already in the group) and shares the same subtype at that moment.
+  function personSiblingSubtype(personId: string): SiblingSubtype | undefined {
+    const rel = relationships.find((r) => r.person_a_id === personId || r.person_b_id === personId);
+    return rel?.sibling_subtype ?? undefined;
+  }
+
   const typeLabel =
     first.type === 'parent_of'  ? first.parent_subtype  === 'biological' ? 'Padre/Madre biológico/a' :
                                    first.parent_subtype  === 'adoptive'   ? 'Padre/Madre adoptivo/a'  :
@@ -120,23 +130,42 @@ export function RelationshipCard({ relationships, allPersons, onDeleted }: Props
         <div className="flex-1 flex items-center gap-2 flex-wrap">
           {isGroup ? (
             <>
-              {uniquePersons.map((p, i) => (
-                <span key={p?.id} className="flex items-center gap-1.5">
-                  <span className="text-sm text-zinc-200">
-                    {p ? [p.given_name, p.paternal_surname].filter(Boolean).join(' ') : ''}
-                  </span>
-                  {p?.nickname && (
-                    <span className="text-xs text-violet-400" style={{ fontFamily: 'var(--font-script)' }}>
-                      &quot;{p.nickname}&quot;
+              {uniquePersons.map((p, i) => {
+                // Sibling subtype is stored PER PAIR, not once for the whole
+                // clique — a group of 3+ can genuinely be mixed (some pairs
+                // full, some half). Showing one shared label for everyone
+                // was hiding that: it just displayed the first relationship's
+                // subtype, so a mixed group silently looked uniform. This
+                // shows each person's own subtype next to their name instead.
+                const subtype = p ? personSiblingSubtype(p.id) : undefined;
+                const subtypeLabel = subtype ? SIBLING_SUBTYPE_LABELS[subtype] : null;
+                return (
+                  <span key={p?.id} className="flex items-center gap-1.5">
+                    <span className="text-sm text-zinc-200">
+                      {p ? [p.given_name, p.paternal_surname].filter(Boolean).join(' ') : ''}
                     </span>
-                  )}
-                  {i < uniquePersons.length - 1 && <span className="text-zinc-600">·</span>}
-                </span>
-              ))}
-              <span className="text-xs text-zinc-600 mx-1">·</span>
-              <span className="text-xs px-2 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-violet-300">
-                {typeLabel}
-              </span>
+                    {p?.nickname && (
+                      <span className="text-xs text-violet-400" style={{ fontFamily: 'var(--font-script)' }}>
+                        &quot;{p.nickname}&quot;
+                      </span>
+                    )}
+                    {first.type === "sibling_of" && subtypeLabel && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-violet-300">
+                        {subtypeLabel}
+                      </span>
+                    )}
+                    {i < uniquePersons.length - 1 && <span className="text-zinc-600">·</span>}
+                  </span>
+                );
+              })}
+              {first.type !== "sibling_of" && (
+                <>
+                  <span className="text-xs text-zinc-600 mx-1">·</span>
+                  <span className="text-xs px-2 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-violet-300">
+                    {typeLabel}
+                  </span>
+                </>
+              )}
             </>
           ) : (
             <>
