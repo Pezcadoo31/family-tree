@@ -47,9 +47,41 @@ const nodeTypes = {
 // merge into one trunk before branching out to each child.
 // ============================================================================
 
-function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd }: EdgeProps) {
-  const trunkX = sourceX + (targetX - sourceX) / 2;
+// Small per-subtype horizontal nudge so two DIFFERENT relationship types
+// sharing the same trunk/column don't sit exactly on top of each other —
+// same subtype still fuses into one clean line (offset 0, unchanged from
+// before), only a different subtype shifts a few px to its own lane.
+const PARENT_SUBTYPE_OFFSET: Record<string, number> = {
+  biological: 0,
+  adoptive: 8,
+  step: -8,
+  foster: 16,
+};
+const SIBLING_SUBTYPE_OFFSET: Record<string, number> = {
+  full: 0,
+  half: 6,
+  step: -6,
+  adoptive: 12,
+};
+
+function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
+  const offset = (data as { offset?: number } | undefined)?.offset ?? 0;
+  const trunkX = sourceX + (targetX - sourceX) / 2 + offset;
   const path = `M ${sourceX},${sourceY} L ${trunkX},${sourceY} L ${trunkX},${targetY} L ${targetX},${targetY}`;
+  return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
+}
+
+// Same idea for same-container sibling/spouse pairs: a plain straight line
+// when offset is 0 (the common case, unchanged), or a short diagonal kink
+// at the midpoint when a different subtype needs its own lane — subtle at
+// this short distance, but enough to read as "not the same line".
+function OffsetStraightEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
+  const offset = (data as { offset?: number } | undefined)?.offset ?? 0;
+  if (offset === 0) {
+    return <BaseEdge path={`M ${sourceX},${sourceY} L ${targetX},${targetY}`} style={style} markerEnd={markerEnd} />;
+  }
+  const midY = sourceY + (targetY - sourceY) / 2;
+  const path = `M ${sourceX},${sourceY} L ${sourceX + offset},${midY} L ${targetX},${targetY}`;
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
@@ -109,6 +141,7 @@ function CrossClusterEdge({
 const edgeTypes = {
   parentTrunk: ParentTrunkEdge,
   crossClusterStep: CrossClusterEdge,
+  offsetStraight: OffsetStraightEdge,
 };
 
 // ============================================================================
@@ -325,7 +358,9 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           sourceHandle: "source-right",
           targetHandle: "target-left",
           type: sameContainer ? "parentTrunk" : "crossClusterStep",
-          data: sameContainer ? undefined : crossClusterRoute(e.source, e.target),
+          data: sameContainer
+            ? { offset: PARENT_SUBTYPE_OFFSET[subtype] ?? 0 }
+            : crossClusterRoute(e.source, e.target),
           animated: true,
           style: {
             strokeWidth: 1.5,
@@ -381,8 +416,10 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: e.target,
           sourceHandle: sameContainer ? "source-bottom" : "source-right",
           targetHandle: sameContainer ? "target-top" : "target-left",
-          type: sameContainer ? "straight" : "crossClusterStep",
-          data: sameContainer ? undefined : crossClusterRoute(e.source, e.target),
+          type: sameContainer ? "offsetStraight" : "crossClusterStep",
+          data: sameContainer
+            ? { offset: SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0 }
+            : crossClusterRoute(e.source, e.target),
           style: {
             strokeWidth: 1.5,
             stroke: color,
