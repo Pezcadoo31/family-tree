@@ -14,6 +14,7 @@ import "@xyflow/react/dist/style.css";
 import { PersonNode } from "./PersonNode";
 import { PetNode } from "./PetNode";
 import { FamilyGroupNode } from "./FamilyGroupNode";
+import { FamilyContainerNode } from "./FamilyContainerNode";
 import { buildTreeLayout } from "@/lib/tree/buildTreeLayout";
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
@@ -28,6 +29,7 @@ const nodeTypes = {
   personNode: PersonNode,
   petNode: PetNode,
   familyGroupNode: FamilyGroupNode,
+  familyContainerNode: FamilyContainerNode,
 };
 
 // ============================================================================
@@ -79,10 +81,26 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           data: { group: n.data.group, onExpand: toggleGroup },
         };
       }
+      if (n.type === "familyContainerNode") {
+        return {
+          id: n.id,
+          type: n.type,
+          position: n.position,
+          style: n.style,
+          data: {
+            group: n.data.group,
+            width: n.data.width,
+            height: n.data.height,
+            onExpand: toggleGroup,
+          },
+        };
+      }
       return {
         id: n.id,
         type: n.type,
         position: n.position,
+        ...(n.parentId ? { parentId: n.parentId } : {}),
+        ...(n.extent ? { extent: n.extent } : {}),
         data:
           n.type === "petNode"
             ? { pet: n.data.pet, generation: n.data.generation }
