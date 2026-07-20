@@ -71,7 +71,13 @@ export function EditRelationshipsPanel({ personId, allPersons }: Props) {
           />
         ))}
         {groups.map((group) => (
-          <RelationshipCard key={group[0].id} relationships={group} allPersons={allPersons} onDeleted={load} />
+          <RelationshipCard
+            key={group[0].id}
+            relationships={group}
+            allPersons={allPersons}
+            onDeleted={load}
+            viewingPersonId={personId}
+          />
         ))}
       </div>
 

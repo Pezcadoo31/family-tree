@@ -21,6 +21,11 @@ type Props = {
   relationships: RelationshipWithPersons[];
   allPersons: Person[];
   onDeleted?: () => void;
+  // Whose profile this card is shown on — excluded from the displayed
+  // list so a person never appears listed as their own sibling/spouse.
+  // Optional (falls back to showing everyone) so this stays safe if this
+  // component is ever reused somewhere not tied to one specific profile.
+  viewingPersonId?: string;
 };
 
 const SIBLING_SUBTYPE_LABELS: Record<SiblingSubtype, string> = {
@@ -34,7 +39,7 @@ const SIBLING_SUBTYPE_LABELS: Record<SiblingSubtype, string> = {
 // COMPONENT
 // ============================================================================
 
-export function RelationshipCard({ relationships, allPersons, onDeleted }: Props) {
+export function RelationshipCard({ relationships, allPersons, onDeleted, viewingPersonId }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [groupEditOpen, setGroupEditOpen] = useState(false);
@@ -44,14 +49,21 @@ export function RelationshipCard({ relationships, allPersons, onDeleted }: Props
   const first = relationships[0];
   const isGroup = relationships.length > 1;
 
+  // Excludes viewingPersonId — this card lives on THEIR profile, so only
+  // the other party/parties (their actual siblings/spouse) should show,
+  // never themselves.
   const uniquePersons = (() => {
     const map = new Map<string, PersonRef>();
     for (const rel of relationships) {
-      if (rel.person_a) map.set(rel.person_a.id, rel.person_a);
-      if (rel.person_b) map.set(rel.person_b.id, rel.person_b);
+      if (rel.person_a && rel.person_a.id !== viewingPersonId) map.set(rel.person_a.id, rel.person_a);
+      if (rel.person_b && rel.person_b.id !== viewingPersonId) map.set(rel.person_b.id, rel.person_b);
     }
     return Array.from(map.values());
   })();
+
+  const otherPerson = viewingPersonId
+    ? (first.person_a?.id === viewingPersonId ? first.person_b : first.person_a)
+    : null;
 
   // First relationship in the group that involves this person — a
   // reasonable single answer even though subtype is stored per pair,
@@ -166,6 +178,21 @@ export function RelationshipCard({ relationships, allPersons, onDeleted }: Props
                   </span>
                 </>
               )}
+            </>
+          ) : viewingPersonId && otherPerson ? (
+            <>
+              <span className="text-sm text-zinc-200">
+                {[otherPerson.given_name, otherPerson.paternal_surname].filter(Boolean).join(' ')}
+              </span>
+              {otherPerson.nickname && (
+                <span className="text-xs text-violet-400" style={{ fontFamily: 'var(--font-script)' }}>
+                  &quot;{otherPerson.nickname}&quot;
+                </span>
+              )}
+              <span className="text-xs text-zinc-600 mx-1">·</span>
+              <span className="text-xs px-2 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-violet-300">
+                {typeLabel}
+              </span>
             </>
           ) : (
             <>
