@@ -138,13 +138,24 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         };
         const color = colorByParentSubtype[subtype] ?? colorByParentSubtype.biological;
 
+        // Same-container parent/child pairs (the common case) sit very
+        // close, often several fanning between the same two tight columns
+        // (both parents → both children). A straight line lets that read
+        // as a clean X-fan, same convention any genealogy chart uses —
+        // smoothstep's boxy step routing was tangling those short segments
+        // into an overlapping zigzag instead. Cross-container pairs (rare
+        // for parent_of, but possible) keep the angled routing so a
+        // distant connection still avoids cutting through unrelated cards.
+        const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
+
         return {
           id: e.id,
           source: e.source,
           target: e.target,
           sourceHandle: "source-right",
           targetHandle: "target-left",
-          type: "smoothstep",
+          type: sameContainer ? "straight" : "smoothstep",
+          ...(sameContainer ? {} : { pathOptions: { borderRadius: 8 } }),
           animated: true,
           style: {
             strokeWidth: 1.5,
