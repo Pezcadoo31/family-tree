@@ -2,19 +2,21 @@ import { notFound } from "next/navigation";
 import { getPetProfileData } from "@/lib/actions/pets";
 import { PetProfileActions } from "@/components/PetProfileActions";
 import { PetProfileContent } from "@/components/PetProfileContent";
-import { BackLink } from "@/components/BackLink";
+import { ProfileModal } from "@/components/ProfileModal";
 
 // ============================================================================
-// PAGE — Server Component. Full-page view: same data + same read-view
-// (PetProfileContent) that the floating modal will use starting in el
-// Paso 10 — this page and the modal can never visually drift apart.
+// INTERCEPTED ROUTE — (.) matches /mascota/[id] navigated from any sibling
+// route at the app root via client-side navigation. Direct visits or a
+// hard refresh skip this and render app/mascota/[id]/page.tsx (Paso 6)
+// instead — same data, same PetProfileContent, just without the floating
+// chrome.
 // ============================================================================
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
-export default async function MascotaProfile({ params }: PageProps) {
+export default async function MascotaProfileModal({ params }: PageProps) {
   const { id } = await params;
   const data = await getPetProfileData(id);
 
@@ -25,14 +27,11 @@ export default async function MascotaProfile({ params }: PageProps) {
   const { pet, allPersons, allPets, petRelationships } = data;
 
   return (
-    <main className="min-h-screen max-w-2xl mx-auto px-6 py-12">
-      {/* Back link + actions */}
-      <div className="flex items-center justify-between mb-8">
-        <BackLink />
-        <PetProfileActions pet={pet} allPersons={allPersons} allPets={allPets} />
-      </div>
-
+    <ProfileModal
+      accent="cyan"
+      actions={<PetProfileActions pet={pet} allPersons={allPersons} allPets={allPets} />}
+    >
       <PetProfileContent pet={pet} petRelationships={petRelationships} />
-    </main>
+    </ProfileModal>
   );
 }

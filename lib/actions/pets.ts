@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
-import type { Species, PetGender, AdoptionSourceType } from "@/lib/types";
+import type { Species, PetGender, AdoptionSourceType, Person, Pet } from "@/lib/types";
+import { getPetRelationshipsForPet, type PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 
 // ============================================================================
 // TYPES — input shape for creating a pet
@@ -163,4 +164,36 @@ export async function deletePet(id: string): Promise<ActionResult> {
 
   revalidatePath("/");
   return { success: true, id };
+}
+
+// ============================================================================
+// getPetProfileData — shared fetch for a pet's full profile. Used by BOTH
+// the full-page route (app/mascota/[id]/page.tsx) and the intercepted modal
+// route, so the two surfaces can never drift out of sync.
+// ============================================================================
+
+export type PetProfileData = {
+  pet: Pet;
+  allPersons: Person[];
+  allPets: Pet[];
+  petRelationships: PetRelationshipWithRefs[];
+};
+
+export async function getPetProfileData(id: string): Promise<PetProfileData | null> {
+  const [petResult, allPersonsResult, allPetsResult, petRelationships] = await Promise.all([
+    supabase.from("pets").select("*").eq("id", id).single(),
+    supabase.from("persons").select("*").order("given_name"),
+    supabase.from("pets").select("*").order("name"),
+    getPetRelationshipsForPet(id),
+  ]);
+
+  const pet: Pet | null = petResult.data;
+  if (!pet) return null;
+
+  return {
+    pet,
+    allPersons: allPersonsResult.data ?? [],
+    allPets: allPetsResult.data ?? [],
+    petRelationships,
+  };
 }

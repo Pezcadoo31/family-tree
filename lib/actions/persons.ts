@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
-import type { Gender } from "@/lib/types";
+import type { Gender, Person, Pet } from "@/lib/types";
+import { getRelationshipsForPerson, type RelationshipWithPersons } from "@/lib/actions/relationships";
+import { getPetRelationshipsForPerson, type PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 
 // ============================================================================
 // TYPES — input shape for creating a person
@@ -180,4 +182,39 @@ export async function deletePerson(id: string): Promise<ActionResult> {
 
   revalidatePath("/");
   return { success: true, id };
+}
+
+// ============================================================================
+// getPersonProfileData — shared fetch for a person's full profile. Used by
+// BOTH the full-page route (app/persona/[id]/page.tsx) and the intercepted
+// modal route, so the two surfaces can never drift out of sync.
+// ============================================================================
+
+export type PersonProfileData = {
+  person: Person;
+  allPersons: Person[];
+  allPets: Pet[];
+  relationships: RelationshipWithPersons[];
+  petRelationships: PetRelationshipWithRefs[];
+};
+
+export async function getPersonProfileData(id: string): Promise<PersonProfileData | null> {
+  const [personResult, allPersonsResult, allPetsResult, relationships, petRelationships] = await Promise.all([
+    supabase.from("persons").select("*").eq("id", id).single(),
+    supabase.from("persons").select("*").order("given_name"),
+    supabase.from("pets").select("*").order("name"),
+    getRelationshipsForPerson(id),
+    getPetRelationshipsForPerson(id),
+  ]);
+
+  const person: Person | null = personResult.data;
+  if (!person) return null;
+
+  return {
+    person,
+    allPersons: allPersonsResult.data ?? [],
+    allPets: allPetsResult.data ?? [],
+    relationships,
+    petRelationships,
+  };
 }

@@ -2,19 +2,21 @@ import { notFound } from "next/navigation";
 import { getPersonProfileData } from "@/lib/actions/persons";
 import { PersonProfileActions } from "@/components/PersonProfileActions";
 import { PersonProfileContent } from "@/components/PersonProfileContent";
-import { BackLink } from "@/components/BackLink";
+import { ProfileModal } from "@/components/ProfileModal";
 
 // ============================================================================
-// PAGE — Server Component. Full-page view: same data + same read-view
-// (PersonProfileContent) that the floating modal will use starting in el
-// Paso 9 — this page and the modal can never visually drift apart.
+// INTERCEPTED ROUTE — (.) matches /persona/[id] navigated from any sibling
+// route at the app root (árbol, home, otro perfil, etc.) via client-side
+// navigation. Direct visits or a hard refresh on /persona/[id] skip this
+// entirely and render app/persona/[id]/page.tsx (Paso 5) instead — same
+// data, same PersonProfileContent, just without the floating chrome.
 // ============================================================================
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
-export default async function PersonaProfile({ params }: PageProps) {
+export default async function PersonaProfileModal({ params }: PageProps) {
   const { id } = await params;
   const data = await getPersonProfileData(id);
 
@@ -25,18 +27,15 @@ export default async function PersonaProfile({ params }: PageProps) {
   const { person, allPersons, allPets, relationships, petRelationships } = data;
 
   return (
-    <main className="min-h-screen max-w-2xl mx-auto px-6 py-12">
-      {/* Back link + actions */}
-      <div className="flex items-center justify-between mb-8">
-        <BackLink />
-        <PersonProfileActions person={person} allPersons={allPersons} allPets={allPets} />
-      </div>
-
+    <ProfileModal
+      accent="violet"
+      actions={<PersonProfileActions person={person} allPersons={allPersons} allPets={allPets} />}
+    >
       <PersonProfileContent
         person={person}
         relationships={relationships}
         petRelationships={petRelationships}
       />
-    </main>
+    </ProfileModal>
   );
 }
