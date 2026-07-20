@@ -375,11 +375,32 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 9) Center each column vertically relative to the tallest column.
+  // 9) Center each column vertically against the tallest column's total
+  //    HEIGHT — not just item count. A family container can span several
+  //    reserved row-slots; counting it as "1 item" like a lone person card
+  //    made two side-by-side families line up by their top edge instead of
+  //    their center whenever one had more members than the other. This
+  //    uses each item's real reserved block height (a container's
+  //    slotsUsed × ROW_HEIGHT, same formula as when the space was
+  //    reserved in el paso 7; everything else is exactly one slot).
   //    Only applies to TOP-LEVEL nodes (no parentId) — nested cluster
   //    members are positioned relative to their container and must be
   //    left untouched.
   // --------------------------------------------------------------
+  // NOTE: this uses the container's REAL pixel height (n.style.height),
+  // not the rounded-to-slots figure from el paso 7. Slots exist to
+  // reserve non-colliding row space in the grid — rounding up is correct
+  // there. But rounding up here would inflate the "block" used for
+  // centering with slack that doesn't actually render (e.g. a 244px
+  // container padded to a 280px block), which pulls the computed center
+  // away from the real visual center. Centering needs the true height.
+  function nodeBlockHeight(n: (typeof nodes)[number]): number {
+    if (n.type === "familyContainerNode" && n.style) {
+      return n.style.height;
+    }
+    return ROW_HEIGHT;
+  }
+
   const nodesByColumn = new Map<number, typeof nodes>();
   for (const n of nodes) {
     if (n.parentId) continue;
@@ -388,10 +409,14 @@ export function buildTreeLayout(
     nodesByColumn.set(n.position.x, list);
   }
 
-  const maxColumnCount = Math.max(0, ...Array.from(nodesByColumn.values()).map((l) => l.length));
+  const columnHeights = new Map<number, number>();
+  for (const [x, list] of nodesByColumn.entries()) {
+    columnHeights.set(x, list.reduce((sum, n) => sum + nodeBlockHeight(n), 0));
+  }
+  const maxColumnHeight = Math.max(0, ...Array.from(columnHeights.values()));
 
-  for (const list of nodesByColumn.values()) {
-    const offset = ((maxColumnCount - list.length) * ROW_HEIGHT) / 2;
+  for (const [x, list] of nodesByColumn.entries()) {
+    const offset = (maxColumnHeight - (columnHeights.get(x) ?? 0)) / 2;
     for (const n of list) {
       n.position.y += offset;
     }
