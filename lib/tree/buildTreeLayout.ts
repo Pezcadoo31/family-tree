@@ -25,6 +25,7 @@ export type TreeEdgeData = {
   target: string;
   kind: "parent_of" | "spouse_of" | "sibling_of" | "pet_relationship";
   parentSubtype?: "biological" | "adoptive" | "step" | "foster";
+  siblingSubtype?: "full" | "half" | "step" | "adoptive";
 };
 
 export type TreeLayout = {
@@ -428,14 +429,43 @@ export function buildTreeLayout(
   //     the same collapsed group (fully internal connection). Nested
   //     nodes keep their real id, so edges to/from them work exactly
   //     as before — React Flow resolves absolute position internally.
-  //     For sibling_of / spouse_of (same column, stacked vertically,
-  //     fixed bottom→top handles), reorder source/target so source
-  //     is always the node positioned above, keeping the connector
-  //     a clean vertical line downward.
+  //
+  //     For sibling_of / spouse_of, source/target order decides which
+  //     end gets which handle direction downstream — get this wrong and
+  //     the line exits facing away from its target, forcing an awkward
+  //     loop back that can clip through an unrelated card in between
+  //     (this is exactly what was happening: Elida's spouse line to a
+  //     faraway Vicencio pill was ordered by Y alone, so it exited
+  //     downward and had to loop back up past Eduardo to reach a target
+  //     that was actually further right, not above).
+  //
+  //     Fix: order by COLUMN first — whichever endpoint's container sits
+  //     further left becomes source, so a horizontal-handle line always
+  //     exits facing toward its target instead of away from it. Only
+  //     when both endpoints share the same column (the common stacked
+  //     pair, e.g. two spouses or two siblings in the same family
+  //     container) does column order tie, and then Y decides — same as
+  //     before, source is whoever sits physically higher, for a clean
+  //     vertical line down.
   // --------------------------------------------------------------
   const yById = new Map<string, number>();
   for (const n of nodes) {
     if (n.type === "personNode" || n.type === "familyGroupNode") yById.set(n.id, n.position.y);
+  }
+
+  // A person's OWN generation isn't reliable for this — inside a cluster,
+  // members get pulled into ONE shared column at their group's anchor
+  // generation, regardless of their individual generation offset within
+  // it. This looks up the column each resolved node id ACTUALLY renders
+  // in: a collapsed pill or a grouped person → their group's anchor
+  // generation; anyone else → their own generation.
+  function effectiveColumnGen(nodeId: string): number {
+    if (nodeId.startsWith("group-")) {
+      return anchorGenByGroupKey.get(nodeId.slice("group-".length)) ?? 0;
+    }
+    const groupKey = personToGroupKey.get(nodeId);
+    if (groupKey) return anchorGenByGroupKey.get(groupKey) ?? 0;
+    return generation.get(nodeId) ?? 0;
   }
 
   const edges: TreeLayout["edges"] = [];
@@ -446,10 +476,14 @@ export function buildTreeLayout(
     if (source === target) continue;
 
     if (rel.type !== "parent_of") {
-      const yA = yById.get(source) ?? 0;
-      const yB = yById.get(target) ?? 0;
-      if (yB < yA) {
-        [source, target] = [target, source];
+      const genA = effectiveColumnGen(source);
+      const genB = effectiveColumnGen(target);
+      if (genA !== genB) {
+        if (genB < genA) [source, target] = [target, source];
+      } else {
+        const yA = yById.get(source) ?? 0;
+        const yB = yById.get(target) ?? 0;
+        if (yB < yA) [source, target] = [target, source];
       }
     }
 
@@ -463,6 +497,7 @@ export function buildTreeLayout(
         target,
         kind: rel.type,
         parentSubtype: rel.type === "parent_of" ? (rel.parent_subtype ?? undefined) : undefined,
+        siblingSubtype: rel.type === "sibling_of" ? (rel.sibling_subtype ?? undefined) : undefined,
       },
     });
   }

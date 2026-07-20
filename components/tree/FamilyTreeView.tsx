@@ -8,6 +8,8 @@ import {
   MiniMap,
   useReactFlow,
   BaseEdge,
+  getSmoothStepPath,
+  Position,
   type Node,
   type Edge,
   type EdgeProps,
@@ -18,6 +20,7 @@ import { PetNode } from "./PetNode";
 import { FamilyGroupNode } from "./FamilyGroupNode";
 import { FamilyContainerNode } from "./FamilyContainerNode";
 import { buildTreeLayout } from "@/lib/tree/buildTreeLayout";
+import { NODE_WIDTH, CLUSTER_COLUMN_WIDTH } from "@/lib/family/layoutFamilyCluster";
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
@@ -50,8 +53,62 @@ function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd 
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
+// ============================================================================
+// CrossClusterEdge — for connections whose two ends live in different
+// family containers. The built-in `type: "smoothstep"` string edge only
+// exposes { offset, borderRadius, stepPosition } — no absolute centerX —
+// so passing centerX through `pathOptions` on that built-in type is
+// silently ignored (confirmed against @xyflow/system's
+// SmoothStepPathOptions type). getSmoothStepPath() does accept centerX
+// directly (confirmed via ParentTrunkEdge) — but a single X turning
+// point only relocates WHERE the line changes height, it can't stop the
+// line from crossing an unrelated card that happens to share the exact
+// same row as one of the endpoints (e.g. a sibling left behind in the
+// target's row: no height change is even needed to reach the target, so
+// there's no bend to relocate — the straight shot passes right through
+// whoever else is in that row).
+//
+// This instead routes through a "safe lane": a Y clear of every row in
+// BOTH containers involved (just above the topmost row or just below
+// the bottommost, whichever is the shorter detour from source), so the
+// long horizontal leg never travels through a card's row at all. Reads
+// { turnX1, turnX2, safeY } from edge `data`, precomputed in
+// crossClusterRoute() below. Falls back to a plain smoothstep if that
+// data is missing (e.g. neither endpoint is inside a container).
+// ============================================================================
+
+function CrossClusterEdge({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style,
+  markerEnd,
+  data,
+}: EdgeProps) {
+  const route = data as { turnX1?: number; turnX2?: number; safeY?: number } | undefined;
+  if (route?.turnX1 === undefined || route?.turnX2 === undefined || route?.safeY === undefined) {
+    const [path] = getSmoothStepPath({
+      sourceX,
+      sourceY,
+      sourcePosition: sourcePosition ?? Position.Right,
+      targetX,
+      targetY,
+      targetPosition: targetPosition ?? Position.Left,
+      borderRadius: 8,
+    });
+    return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
+  }
+  const { turnX1, turnX2, safeY } = route;
+  const path = `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${safeY} L ${turnX2},${safeY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
+  return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
+}
+
 const edgeTypes = {
   parentTrunk: ParentTrunkEdge,
+  crossClusterStep: CrossClusterEdge,
 };
 
 // ============================================================================
@@ -142,6 +199,88 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       containerByNodeId.set(n.id, n.parentId);
     }
 
+    // For a cross-container connection, force the smoothstep's turning
+    // point at the SOURCE container's real right edge (the empty gap
+    // between families) instead of letting it default to an arbitrary
+    // midpoint that can land right on top of an unrelated sibling's card
+    // still inside that same container (e.g. Celia's line to Elida, who
+    // moved to Vicencio, was turning mid-way through Bernardina/Eduardo's
+    // column). Falls back to the target container's left edge if the
+    // source isn't inside a container itself.
+    const nodeById = new Map<string, (typeof layout.nodes)[number]>();
+    for (const n of layout.nodes) {
+      nodeById.set(n.id, n);
+    }
+
+    const containerBoundsById = new Map<string, { left: number; right: number; top: number; bottom: number }>();
+    for (const n of layout.nodes) {
+      if (n.type === "familyContainerNode" && n.style) {
+        containerBoundsById.set(n.id, {
+          left: n.position.x,
+          right: n.position.x + n.style.width,
+          top: n.position.y,
+          bottom: n.position.y + n.style.height,
+        });
+      }
+    }
+
+    // Route through a "safe lane" instead of picking a single turning
+    // point: exit right after the SOURCE's own card (the narrow gutter
+    // between its local column and the next one), travel to a Y clear of
+    // EVERY row in both containers involved — just above the topmost row
+    // or just below the bottommost, whichever is the shorter detour from
+    // source — cross at that height, then descend/ascend into the
+    // target's row only once there's nothing left to cross. A single X
+    // turning point (tried first) only relocates WHERE the line changes
+    // height — it can't help when source and target already share a row
+    // (no height change needed at all), which is exactly what was
+    // happening: Celia and Elida ended up in the same row as Bernardina,
+    // so the straight shot between them passed right through her card
+    // regardless of any turning point.
+    const GUTTER_HALF = (CLUSTER_COLUMN_WIDTH - NODE_WIDTH) / 2;
+    const CROSS_CLUSTER_MARGIN = 16;
+
+    function crossClusterRoute(
+      source: string,
+      target: string
+    ): { turnX1: number; turnX2: number; safeY: number } | undefined {
+      const sourceNode = nodeById.get(source);
+      const targetNode = nodeById.get(target);
+      if (!sourceNode || !targetNode) return undefined;
+
+      const sourceContainerId = containerByNodeId.get(source);
+      const targetContainerId = containerByNodeId.get(target);
+      const sourceBounds = sourceContainerId ? containerBoundsById.get(sourceContainerId) : undefined;
+      const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
+      if (!sourceBounds && !targetBounds) return undefined;
+
+      const turnX1 = sourceBounds
+        ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF
+        : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
+      const turnX2 = targetBounds
+        ? targetBounds.left + targetNode.position.x - GUTTER_HALF
+        : targetNode.position.x - GUTTER_HALF;
+
+      const sourceAbsY = sourceBounds ? sourceBounds.top + sourceNode.position.y : sourceNode.position.y;
+
+      // Clear only the SOURCE container's own rows — that's where the
+      // "an unrelated sibling shares this row" problem actually
+      // originates, and the horizontal safe-lane travel never enters
+      // either container's internal column space anyway (turnX1/turnX2
+      // sit in the gutter just outside each one). Clearing the TARGET's
+      // full span too — as this first did — over-detours whenever the
+      // two containers differ a lot in height, since it then has to clear
+      // whichever one is taller even when only the source side actually
+      // needs it. Falls back to target's bounds only when source isn't
+      // inside a container at all.
+      const referenceBounds = sourceBounds ?? targetBounds!;
+      const aboveY = referenceBounds.top - CROSS_CLUSTER_MARGIN;
+      const belowY = referenceBounds.bottom + CROSS_CLUSTER_MARGIN;
+      const safeY = Math.abs(sourceAbsY - aboveY) <= Math.abs(belowY - sourceAbsY) ? aboveY : belowY;
+
+      return { turnX1, turnX2, safeY };
+    }
+
     const flowEdges: Edge[] = layout.edges.map((e) => {
       if (e.data.kind === "parent_of") {
         const subtype = e.data.parentSubtype ?? "biological";
@@ -176,8 +315,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: e.target,
           sourceHandle: "source-right",
           targetHandle: "target-left",
-          type: sameContainer ? "parentTrunk" : "smoothstep",
-          ...(sameContainer ? {} : { pathOptions: { borderRadius: 8 } }),
+          type: sameContainer ? "parentTrunk" : "crossClusterStep",
+          data: sameContainer ? undefined : crossClusterRoute(e.source, e.target),
           animated: true,
           style: {
             strokeWidth: 1.5,
@@ -187,14 +326,22 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         };
       }
       if (e.data.kind === "spouse_of") {
+        // Same-container couples (the common case) are stacked directly
+        // above/below each other — vertical handles give a clean short
+        // line. Once the pair crosses into different containers (e.g. one
+        // side stayed in their family of origin, collapsed, far from the
+        // other), vertical handles force an up-and-over loop that can clip
+        // through an unrelated card on the way — horizontal handles face
+        // directly toward the target instead.
+        const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
         return {
           id: e.id,
           source: e.source,
           target: e.target,
-          sourceHandle: "source-bottom",
-          targetHandle: "target-top",
-          type: "smoothstep",
-          pathOptions: { borderRadius: 8 },
+          sourceHandle: sameContainer ? "source-bottom" : "source-right",
+          targetHandle: sameContainer ? "target-top" : "target-left",
+          type: sameContainer ? "straight" : "crossClusterStep",
+          data: sameContainer ? undefined : crossClusterRoute(e.source, e.target),
           style: { strokeWidth: 1.5, stroke: "#71717a", strokeDasharray: "4 4" },
         };
       }
@@ -202,21 +349,34 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         // Same-container siblings are stacked only ~10px apart — at that
         // length the connector handles at each end already eat almost the
         // whole line, so a dotted pattern has no room to read as "dotted"
-        // no matter how it's tuned. Solid relies on the distinct lime
-        // color to identify it instead. The dotted pattern is kept for the
-        // cross-container case, where there's plenty of length for it.
+        // no matter how it's tuned. Solid relies on color to identify it
+        // instead. The dotted pattern is kept for the cross-container
+        // case, where there's plenty of length for it. Same reasoning as
+        // spouse_of above for the handle switch.
         const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
+
+        // Distinct color PER sibling subtype — full/half/step/adoptive all
+        // read as "sibling" (same family of dash treatment) but shouldn't
+        // be visually indistinguishable from one another.
+        const colorBySiblingSubtype: Record<string, string> = {
+          full:     "#84cc16", // lime
+          half:     "#facc15", // yellow
+          step:     "#fb7185", // rose
+          adoptive: "#818cf8", // indigo
+        };
+        const color = colorBySiblingSubtype[e.data.siblingSubtype ?? "full"] ?? colorBySiblingSubtype.full;
+
         return {
           id: e.id,
           source: e.source,
           target: e.target,
-          sourceHandle: "source-bottom",
-          targetHandle: "target-top",
-          type: sameContainer ? "straight" : "smoothstep",
-          ...(sameContainer ? {} : { pathOptions: { borderRadius: 8 } }),
+          sourceHandle: sameContainer ? "source-bottom" : "source-right",
+          targetHandle: sameContainer ? "target-top" : "target-left",
+          type: sameContainer ? "straight" : "crossClusterStep",
+          data: sameContainer ? undefined : crossClusterRoute(e.source, e.target),
           style: {
             strokeWidth: 1.5,
-            stroke: "#84cc16",
+            stroke: color,
             strokeDasharray: sameContainer ? undefined : "1 4",
           },
         };

@@ -8,8 +8,8 @@ import type { FamilyGroup } from "./detectFamilyGroups";
 // cluster is a compact, self-contained block, not another generation of
 // the main grid.
 
-const NODE_WIDTH = 200;
-const CLUSTER_COLUMN_WIDTH = 240;
+export const NODE_WIDTH = 200;
+export const CLUSTER_COLUMN_WIDTH = 240;
 const CLUSTER_ROW_HEIGHT = 76;
 const HEADER_HEIGHT = 44; // space reserved for the "🏠 Familia X" label + collapse button
 const PADDING = 24;
