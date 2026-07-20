@@ -7,8 +7,10 @@ import {
   Controls,
   MiniMap,
   useReactFlow,
+  BaseEdge,
   type Node,
   type Edge,
+  type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { PersonNode } from "./PersonNode";
@@ -30,6 +32,26 @@ const nodeTypes = {
   petNode: PetNode,
   familyGroupNode: FamilyGroupNode,
   familyContainerNode: FamilyContainerNode,
+};
+
+// ============================================================================
+// ParentTrunkEdge — EXPERIMENTAL. Routes same-container parent→child lines
+// through a shared vertical "trunk" positioned exactly halfway between the
+// parents' column and the children's column. Both parents sit in the same
+// column (same X), and all their children sit in the same column too (same
+// X) — so that halfway point works out identical for every parent→child
+// line in the family, which is what makes the two parents' lines visually
+// merge into one trunk before branching out to each child.
+// ============================================================================
+
+function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd }: EdgeProps) {
+  const trunkX = sourceX + (targetX - sourceX) / 2;
+  const path = `M ${sourceX},${sourceY} L ${trunkX},${sourceY} L ${trunkX},${targetY} L ${targetX},${targetY}`;
+  return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
+}
+
+const edgeTypes = {
+  parentTrunk: ParentTrunkEdge,
 };
 
 // ============================================================================
@@ -154,7 +176,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: e.target,
           sourceHandle: "source-right",
           targetHandle: "target-left",
-          type: sameContainer ? "straight" : "smoothstep",
+          type: sameContainer ? "parentTrunk" : "smoothstep",
           ...(sameContainer ? {} : { pathOptions: { borderRadius: 8 } }),
           animated: true,
           style: {
@@ -242,6 +264,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           fitView
           fitViewOptions={{ padding: 0.35, duration: 600 }}
           minZoom={0.3}
