@@ -36,8 +36,8 @@ export function PersonNode({ data }: PersonNodeProps) {
 
   return (
     <>
-      <Handle type="target" position={Position.Left} id="target-left" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
-      <Handle type="target" position={Position.Top} id="target-top" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
+      <Handle type="target" position={Position.Left} id="target-left" className="bg-violet-accent/50! border-none! w-2! h-2!" />
+      <Handle type="target" position={Position.Top} id="target-top" className="bg-violet-accent/50! border-none! w-2! h-2!" />
 
       <Link
         href={`/persona/${person.id}`}
@@ -75,8 +75,8 @@ export function PersonNode({ data }: PersonNodeProps) {
         </div>
       </Link>
 
-      <Handle type="source" position={Position.Right} id="source-right" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
-      <Handle type="source" position={Position.Bottom} id="source-bottom" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
+      <Handle type="source" position={Position.Right} id="source-right" className="bg-violet-accent/50! border-none! w-2! h-2!" />
+      <Handle type="source" position={Position.Bottom} id="source-bottom" className="bg-violet-accent/50! border-none! w-2! h-2!" />
     </>
   );
 }

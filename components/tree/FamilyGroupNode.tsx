@@ -24,8 +24,8 @@ export function FamilyGroupNode({ data }: FamilyGroupNodeProps) {
 
   return (
     <>
-      <Handle type="target" position={Position.Left} id="target-left" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
-      <Handle type="target" position={Position.Top} id="target-top" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
+      <Handle type="target" position={Position.Left} id="target-left" className="bg-violet-accent/50! border-none! w-2! h-2!" />
+      <Handle type="target" position={Position.Top} id="target-top" className="bg-violet-accent/50! border-none! w-2! h-2!" />
 
       <button
         type="button"
@@ -43,8 +43,8 @@ export function FamilyGroupNode({ data }: FamilyGroupNodeProps) {
         <p className="text-[10px] text-violet-400 mt-0.5">Click para expandir</p>
       </button>
 
-      <Handle type="source" position={Position.Right} id="source-right" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
-      <Handle type="source" position={Position.Bottom} id="source-bottom" className="!bg-violet-accent/50 !border-none !w-2 !h-2" />
+      <Handle type="source" position={Position.Right} id="source-right" className="bg-violet-accent/50! border-none! w-2! h-2!" />
+      <Handle type="source" position={Position.Bottom} id="source-bottom" className="bg-violet-accent/50! border-none! w-2! h-2!" />
     </>
   );
 }

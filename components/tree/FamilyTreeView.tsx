@@ -442,9 +442,9 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         >
           <FitViewOnGroupToggle trigger={collapsedKeys} />
           <Background color="#2a2a35" gap={24} size={1} />
-          <Controls className="!bg-surface-raised !border !border-surface-border [&>button]:!bg-surface-raised [&>button]:!border-surface-border [&>button]:!fill-zinc-400 [&>button:hover]:!bg-[#1a1a25]" />
+          <Controls className="bg-surface-raised! border! border-surface-border! [&>button]:bg-surface-raised! [&>button]:border-surface-border! [&>button]:fill-zinc-400! [&>button:hover]:bg-[#1a1a25]!" />
           <MiniMap
-            className="!bg-surface-raised !border !border-surface-border"
+            className="bg-surface-raised! border! border-surface-border!"
             nodeColor="#a855f7"
             maskColor="rgba(10,10,15,0.7)"
           />

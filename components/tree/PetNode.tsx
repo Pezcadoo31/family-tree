@@ -25,8 +25,8 @@ export function PetNode({ data }: PetNodeProps) {
 
   return (
     <>
-      <Handle type="target" position={Position.Left} id="target-left" className="!bg-cyan-accent/50 !border-none !w-2 !h-2" />
-      <Handle type="target" position={Position.Top} id="target-top" className="!bg-cyan-accent/50 !border-none !w-2 !h-2" />
+      <Handle type="target" position={Position.Left} id="target-left" className="bg-cyan-accent/50! border-none! w-2! h-2!" />
+      <Handle type="target" position={Position.Top} id="target-top" className="bg-cyan-accent/50! border-none! w-2! h-2!" />
 
       <Link
         href={`/mascota/${pet.id}`}
@@ -59,8 +59,8 @@ export function PetNode({ data }: PetNodeProps) {
         </div>
       </Link>
 
-      <Handle type="source" position={Position.Right} id="source-right" className="!bg-cyan-accent/50 !border-none !w-2 !h-2" />
-      <Handle type="source" position={Position.Bottom} id="source-bottom" className="!bg-cyan-accent/50 !border-none !w-2 !h-2" />
+      <Handle type="source" position={Position.Right} id="source-right" className="bg-cyan-accent/50! border-none! w-2! h-2!" />
+      <Handle type="source" position={Position.Bottom} id="source-bottom" className="bg-cyan-accent/50! border-none! w-2! h-2!" />
     </>
   );
 }
