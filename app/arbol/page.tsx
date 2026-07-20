@@ -64,7 +64,7 @@ export default async function ArbolPage() {
         <LegendItem color="#ec4899" label="Padrastro/Madrastra" dotted />
         <LegendItem color="#38bdf8" label="Tutor/a temporal" dotted />
         <LegendItem color="#71717a" label="Cónyuge" dashed />
-        <LegendItem color="#52525b" label="Hermanos" dotted />
+        <LegendItem color="#84cc16" label="Hermanos" dotted />
         <LegendItem color="#00c2b0" label="Mascota" />
       </div>
     </main>

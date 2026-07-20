@@ -108,6 +108,18 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       };
     });
 
+    // Sibling/spouse lines route differently depending on distance: a clean
+    // short straight line when both people share the same family container
+    // (the common case), or an angled route when they've landed in
+    // different containers (e.g. a sibling who stayed in their family of
+    // origin while the other formed their own household) — so it never has
+    // to detour awkwardly for a short adjacent pair, but also never cuts
+    // diagonally across unrelated cards for a long-distance one.
+    const containerByNodeId = new Map<string, string | undefined>();
+    for (const n of layout.nodes) {
+      containerByNodeId.set(n.id, n.parentId);
+    }
+
     const flowEdges: Edge[] = layout.edges.map((e) => {
       if (e.data.kind === "parent_of") {
         const subtype = e.data.parentSubtype ?? "biological";
@@ -154,15 +166,26 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         };
       }
       if (e.data.kind === "sibling_of") {
+        // Same-container siblings are stacked only ~10px apart — at that
+        // length the connector handles at each end already eat almost the
+        // whole line, so a dotted pattern has no room to read as "dotted"
+        // no matter how it's tuned. Solid relies on the distinct lime
+        // color to identify it instead. The dotted pattern is kept for the
+        // cross-container case, where there's plenty of length for it.
+        const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
         return {
           id: e.id,
           source: e.source,
           target: e.target,
           sourceHandle: "source-bottom",
           targetHandle: "target-top",
-          type: "smoothstep",
-          pathOptions: { borderRadius: 8 },
-          style: { strokeWidth: 1, stroke: "#52525b", strokeDasharray: "1 4" },
+          type: sameContainer ? "straight" : "smoothstep",
+          ...(sameContainer ? {} : { pathOptions: { borderRadius: 8 } }),
+          style: {
+            strokeWidth: 1.5,
+            stroke: "#84cc16",
+            strokeDasharray: sameContainer ? undefined : "1 4",
+          },
         };
       }
       return {
@@ -171,8 +194,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         target: e.target,
         sourceHandle: "source-right",
         targetHandle: "target-left",
-        type: "smoothstep",
-        pathOptions: { borderRadius: 8 },
+        type: "default",
         style: { strokeWidth: 1.5, stroke: "#00c2b0" },
       };
     });
