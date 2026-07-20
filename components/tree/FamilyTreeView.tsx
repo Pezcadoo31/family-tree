@@ -244,6 +244,15 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       source: string,
       target: string
     ): { turnX1: number; turnX2: number; safeY: number } | undefined {
+      // A collapsed group renders as a single pill, not a column of member
+      // rows — there's nothing for the safe-lane detour to protect against
+      // on that side. Without this check, the OTHER side's real container
+      // bounds were still used as a fallback reference (meant for "real
+      // container → loose person" cases), so even a connection to a
+      // collapsed pill took the same big detour. Bail out here and let
+      // CrossClusterEdge fall back to its plain smoothstep instead.
+      if (source.startsWith("group-") || target.startsWith("group-")) return undefined;
+
       const sourceNode = nodeById.get(source);
       const targetNode = nodeById.get(target);
       if (!sourceNode || !targetNode) return undefined;

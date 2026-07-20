@@ -52,7 +52,17 @@ export function layoutFamilyCluster(
   }
 
   for (const p of group.parents) push(p.id, "person", 0);
-  for (const c of group.children) push(c.id, "person", 1);
+
+  // Oldest first — standard genealogy-chart convention. Unknown birth
+  // dates sort last rather than defaulting to "oldest", since we don't
+  // actually know where they belong.
+  const sortedChildren = [...group.children].sort((a, b) => {
+    if (!a.birth_date && !b.birth_date) return 0;
+    if (!a.birth_date) return 1;
+    if (!b.birth_date) return -1;
+    return a.birth_date.localeCompare(b.birth_date);
+  });
+  for (const c of sortedChildren) push(c.id, "person", 1);
 
   const memberPersonIds = new Set([...group.parents, ...group.children].map((m) => m.id));
   for (const pet of group.pets) {
