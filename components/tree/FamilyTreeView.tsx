@@ -19,6 +19,7 @@ import { PersonNode } from "./PersonNode";
 import { PetNode } from "./PetNode";
 import { FamilyGroupNode } from "./FamilyGroupNode";
 import { FamilyContainerNode } from "./FamilyContainerNode";
+import { SiblingJunctionNode } from "./SiblingJunctionNode";
 import { buildTreeLayout } from "@/lib/tree/buildTreeLayout";
 import { NODE_WIDTH, CLUSTER_COLUMN_WIDTH } from "@/lib/family/layoutFamilyCluster";
 import type { Person, Pet } from "@/lib/types";
@@ -35,6 +36,7 @@ const nodeTypes = {
   petNode: PetNode,
   familyGroupNode: FamilyGroupNode,
   familyContainerNode: FamilyContainerNode,
+  siblingJunctionNode: SiblingJunctionNode,
 };
 
 // ============================================================================
@@ -126,7 +128,7 @@ function CrossClusterEdge({
   markerEnd,
   data,
 }: EdgeProps) {
-  const route = data as { turnX1?: number; turnX2?: number } | undefined;
+  const route = data as { turnX1?: number; turnX2?: number; junctionY?: number } | undefined;
   if (route?.turnX1 === undefined || route?.turnX2 === undefined) {
     const [path] = getSmoothStepPath({
       sourceX,
@@ -139,8 +141,18 @@ function CrossClusterEdge({
     });
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
-  const { turnX1, turnX2 } = route;
-  const path = `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${targetY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
+  const { turnX1, turnX2, junctionY } = route;
+  // With junctionY: the shared horizontal leg travels at the SIBLING
+  // GROUP'S vertical center instead of the specific member's own row —
+  // so the crossing reads as coming from the family as a whole, not from
+  // whichever member happened to hold the one real DB connection. Short
+  // vertical corrections at turnX1 (down/up from the real source row to
+  // the center) and turnX2 (from the center to the real target row) stay
+  // in the safe gutter zone, same as the rest of this route.
+  const path =
+    junctionY !== undefined
+      ? `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${junctionY} L ${turnX2},${junctionY} L ${turnX2},${targetY} L ${targetX},${targetY}`
+      : `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${targetY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
@@ -405,8 +417,155 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       }
     }
 
+    // Vertical center of EVERY sibling-clique member who shares nodeId's
+    // container — run AFTER the spanning tree loop above so union-find
+    // roots are fully settled. Used so a cross-container sibling
+    // connection travels through the family's shared midpoint instead of
+    // whichever specific member happened to win the MST's arbitrary tie
+    // (Guadalupe, right now) — the crossing should read as coming from
+    // the group, not from one person in particular.
+    function containerJunctionY(nodeId: string): number | undefined {
+      const containerId = containerByNodeId.get(nodeId);
+      const bounds = containerId ? containerBoundsById.get(containerId) : undefined;
+      if (!containerId || !bounds) return undefined;
+
+      const root = findSpanningRoot(nodeId);
+      const ys: number[] = [];
+      const seen = new Set<string>();
+      for (const e of siblingEdges) {
+        for (const candidate of [e.source, e.target]) {
+          if (seen.has(candidate)) continue;
+          if (containerByNodeId.get(candidate) === containerId && findSpanningRoot(candidate) === root) {
+            const y = nodeById.get(candidate)?.position.y;
+            if (y !== undefined) ys.push(y);
+            seen.add(candidate);
+          }
+        }
+      }
+      if (ys.length === 0) return undefined;
+      return bounds.top + (Math.min(...ys) + Math.max(...ys)) / 2;
+    }
+
+    // For a sibling clique with a real cross-container connection, build
+    // a visible "hub": every member on the source side gets their OWN
+    // spoke line into a shared junction node, and ONE bridge line
+    // continues from that junction across to the other family — instead
+    // of implying the group connection through a single MST-picked
+    // edge's shared travel-Y. Each spoke uses that specific member's own
+    // REAL sibling_of row to the target (not a fabricated color) — if a
+    // member has no direct row to the target in the data, they're
+    // skipped rather than inventing a relationship that isn't there.
+    const crossContainerSiblingEdges = siblingEdges.filter(
+      (e) => keepSiblingEdgeId.has(e.id) && containerByNodeId.get(e.source) !== containerByNodeId.get(e.target)
+    );
+
+    const colorBySiblingSubtype: Record<string, string> = {
+      full: "#84cc16",
+      half: "#facc15",
+      step: "#fb7185",
+      adoptive: "#818cf8",
+    };
+
+    const junctionNodes: Node[] = [];
+    const junctionEdges: Edge[] = [];
+    const suppressedSiblingEdgeIds = new Set<string>();
+    const handledHubs = new Set<string>();
+
+    for (const crossEdge of crossContainerSiblingEdges) {
+      suppressedSiblingEdgeIds.add(crossEdge.id);
+
+      const sourceContainerId = containerByNodeId.get(crossEdge.source);
+      if (!sourceContainerId) continue;
+      const hubKey = `${sourceContainerId}->${crossEdge.target}`;
+      if (handledHubs.has(hubKey)) continue;
+      handledHubs.add(hubKey);
+
+      const bounds = containerBoundsById.get(sourceContainerId);
+      if (!bounds) continue;
+
+      const root = findSpanningRoot(crossEdge.source);
+      const members = new Set<string>();
+      for (const e of siblingEdges) {
+        for (const cand of [e.source, e.target]) {
+          if (containerByNodeId.get(cand) === sourceContainerId && findSpanningRoot(cand) === root) {
+            members.add(cand);
+          }
+        }
+        // Same-container spoke among hub members is replaced by their
+        // individual spoke to the junction — suppress it so no one shows
+        // both a neighbor-chain segment AND a hub spoke.
+        if (
+          containerByNodeId.get(e.source) === sourceContainerId &&
+          containerByNodeId.get(e.target) === sourceContainerId &&
+          findSpanningRoot(e.source) === root
+        ) {
+          suppressedSiblingEdgeIds.add(e.id);
+        }
+      }
+      if (members.size === 0) continue;
+
+      const junctionY = containerJunctionY(crossEdge.source) ?? (bounds.top + bounds.bottom) / 2;
+      const turnX1 = bounds.right + GUTTER_HALF;
+      const junctionId = `sibling-junction-${sourceContainerId}-${crossEdge.target}`;
+
+      junctionNodes.push({
+        id: junctionId,
+        type: "siblingJunctionNode",
+        position: { x: turnX1, y: junctionY },
+        data: {},
+      });
+
+      for (const memberId of members) {
+        const directEdge = siblingEdges.find(
+          (e) =>
+            (e.source === memberId && e.target === crossEdge.target) ||
+            (e.source === crossEdge.target && e.target === memberId)
+        );
+        if (!directEdge) continue; // no real row for this member — don't invent one
+        const subtype = directEdge.data.siblingSubtype ?? "full";
+        junctionEdges.push({
+          id: `${directEdge.id}-spoke`,
+          source: memberId,
+          target: junctionId,
+          sourceHandle: "source-right",
+          targetHandle: "target-left",
+          type: "smoothstep",
+          style: {
+            strokeWidth: 1.5,
+            stroke: colorBySiblingSubtype[subtype] ?? colorBySiblingSubtype.full,
+            strokeDasharray: "1 4",
+          },
+        });
+      }
+
+      const targetContainerId = containerByNodeId.get(crossEdge.target);
+      const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
+      const targetNode = nodeById.get(crossEdge.target);
+      const turnX2 = targetNode
+        ? targetBounds
+          ? targetBounds.left + targetNode.position.x - GUTTER_HALF
+          : targetNode.position.x - GUTTER_HALF
+        : turnX1;
+
+      const bridgeSubtype = crossEdge.data.siblingSubtype ?? "full";
+      junctionEdges.push({
+        id: `${crossEdge.id}-bridge`,
+        source: junctionId,
+        target: crossEdge.target,
+        sourceHandle: "source-right",
+        targetHandle: "target-left",
+        type: "crossClusterStep",
+        data: { turnX1, turnX2 },
+        style: {
+          strokeWidth: 1.5,
+          stroke: colorBySiblingSubtype[bridgeSubtype] ?? colorBySiblingSubtype.full,
+          strokeDasharray: "1 4",
+        },
+      });
+    }
+
     const flowEdges: Edge[] = layout.edges
-      .filter((e) => e.data.kind !== "sibling_of" || keepSiblingEdgeId.has(e.id))
+      .filter((e) => e.data.kind !== "sibling_of" || (keepSiblingEdgeId.has(e.id) && !suppressedSiblingEdgeIds.has(e.id)))
       .map((e) => {
       if (e.data.kind === "parent_of") {
         const subtype = e.data.parentSubtype ?? "biological";
@@ -509,7 +668,10 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           type: sameContainer ? "siblingTrunk" : "crossClusterStep",
           data: sameContainer
             ? { trunkOffset: SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0 }
-            : crossClusterRoute(e.source, e.target, SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0),
+            : {
+                ...crossClusterRoute(e.source, e.target, SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0),
+                junctionY: containerJunctionY(e.source),
+              },
           style: {
             strokeWidth: 1.5,
             stroke: color,
@@ -528,7 +690,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       };
       });
 
-    return { nodes: flowNodes, edges: flowEdges };
+    return { nodes: [...flowNodes, ...junctionNodes], edges: [...flowEdges, ...junctionEdges] };
   }, [persons, pets, relationships, petRelationships, familyGroups, collapsedKeys]);
 
   return (
