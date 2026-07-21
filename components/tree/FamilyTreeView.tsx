@@ -57,18 +57,6 @@ const PARENT_SUBTYPE_OFFSET: Record<string, number> = {
   step: -8,
   foster: 16,
 };
-// Cross-container connections are inherently viewed more zoomed out (two
-// full family boxes have to fit on screen at once) — the same offset
-// that reads clearly on a single trunk becomes a couple screen-pixels,
-// effectively invisible. Confirmed via fiber: the offset WAS applying
-// correctly (8px real difference), just too small to perceive at that
-// zoom level — not a propagation bug, purely a magnitude one.
-const PARENT_SUBTYPE_OFFSET_CROSS: Record<string, number> = {
-  biological: 0,
-  adoptive: 28,
-  step: -28,
-  foster: 56,
-};
 // Wider spacing than the parent-trunk lanes above — this isn't a brief
 // kink on a short adjacent line anymore, it's a full parallel lane
 // running the height of the sibling trunk, so it needs enough separation
@@ -313,9 +301,16 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
       if (!sourceBounds && !targetBounds) return undefined;
 
-      const turnX1 = sourceBounds
-        ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF
-        : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
+      // The container's own RIGHT EDGE, not the source's own local column
+      // position. A child (rightmost local column) happens to already
+      // sit near that edge, so their turn point looked fine before — but
+      // a parent (leftmost local column) would only clear ITS OWN column,
+      // landing the turn — and the vertical run after it — in the narrow
+      // gutter between parents and children, hugging right past the
+      // children's cards instead of exiting past the whole family. Every
+      // source, regardless of which internal column it starts in, has to
+      // reach the container's true edge to cross over anyway.
+      const turnX1 = sourceBounds ? sourceBounds.right + GUTTER_HALF : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
       const turnX2 = targetBounds
         ? targetBounds.left + targetNode.position.x - GUTTER_HALF
         : targetNode.position.x - GUTTER_HALF;
@@ -496,9 +491,15 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           sourceHandle: "source-right",
           targetHandle: "target-left",
           type: sameContainer ? "parentTrunk" : "crossClusterStep",
+          // Cross-container parent lines to the same target now share
+          // IDENTICAL turnX1/turnX2/safeY regardless of subtype — fully
+          // fused, no fork at all. Distinguishing biological vs. step
+          // visually here was explicitly traded away in favor of one
+          // clean shared connection; each edge keeps its own color in
+          // `style` below even though the paths overlap exactly.
           data: sameContainer
             ? { offset: PARENT_SUBTYPE_OFFSET[subtype] ?? 0 }
-            : crossClusterRoute(e.source, e.target, PARENT_SUBTYPE_OFFSET_CROSS[subtype] ?? 0),
+            : crossClusterRoute(e.source, e.target),
           animated: true,
           style: {
             strokeWidth: 1.5,
