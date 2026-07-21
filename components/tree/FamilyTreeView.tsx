@@ -99,18 +99,20 @@ function SiblingTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd
 // directly (confirmed via ParentTrunkEdge) — but a single X turning
 // point only relocates WHERE the line changes height, it can't stop the
 // line from crossing an unrelated card that happens to share the exact
-// same row as one of the endpoints (e.g. a sibling left behind in the
-// target's row: no height change is even needed to reach the target, so
-// there's no bend to relocate — the straight shot passes right through
-// whoever else is in that row).
+// same row as one of the endpoints.
 //
-// This instead routes through a "safe lane": a Y clear of every row in
-// BOTH containers involved (just above the topmost row or just below
-// the bottommost, whichever is the shorter detour from source), so the
-// long horizontal leg never travels through a card's row at all. Reads
-// { turnX1, turnX2, safeY } from edge `data`, precomputed in
-// crossClusterRoute() below. Falls back to a plain smoothstep if that
-// data is missing (e.g. neither endpoint is inside a container).
+// That row-crossing risk is why this used to detour through a "safe
+// lane" Y clear of every row in both containers before crossing over —
+// but that's no longer needed now that turnX1 exits at the SOURCE
+// CONTAINER'S OWN right edge (not a local column position inside it):
+// every source, regardless of which internal column it starts in,
+// already clears every card in its own family before the horizontal
+// leg even begins. The horizontal leg then travels entirely through the
+// empty gap between the two containers — nothing lives there to cross,
+// at any Y — so the extra vertical detour was pure overhead. Reads
+// { turnX1, turnX2 } from edge `data`, precomputed in crossClusterRoute()
+// below. Falls back to a plain smoothstep if that data is missing (e.g.
+// neither endpoint is inside a container).
 // ============================================================================
 
 function CrossClusterEdge({
@@ -124,8 +126,8 @@ function CrossClusterEdge({
   markerEnd,
   data,
 }: EdgeProps) {
-  const route = data as { turnX1?: number; turnX2?: number; safeY?: number } | undefined;
-  if (route?.turnX1 === undefined || route?.turnX2 === undefined || route?.safeY === undefined) {
+  const route = data as { turnX1?: number; turnX2?: number } | undefined;
+  if (route?.turnX1 === undefined || route?.turnX2 === undefined) {
     const [path] = getSmoothStepPath({
       sourceX,
       sourceY,
@@ -137,8 +139,8 @@ function CrossClusterEdge({
     });
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
-  const { turnX1, turnX2, safeY } = route;
-  const path = `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${safeY} L ${turnX2},${safeY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
+  const { turnX1, turnX2 } = route;
+  const path = `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${targetY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
@@ -261,34 +263,25 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       }
     }
 
-    // Route through a "safe lane" instead of picking a single turning
-    // point: exit right after the SOURCE's own card (the narrow gutter
-    // between its local column and the next one), travel to a Y clear of
-    // EVERY row in both containers involved — just above the topmost row
-    // or just below the bottommost, whichever is the shorter detour from
-    // source — cross at that height, then descend/ascend into the
-    // target's row only once there's nothing left to cross. A single X
-    // turning point (tried first) only relocates WHERE the line changes
-    // height — it can't help when source and target already share a row
-    // (no height change needed at all), which is exactly what was
-    // happening: Celia and Elida ended up in the same row as Bernardina,
-    // so the straight shot between them passed right through her card
-    // regardless of any turning point.
+    // Exit right after the SOURCE CONTAINER'S OWN right edge (not a local
+    // column position inside it — every member, whether parent or child,
+    // clears the whole family this way, not just their own column) and
+    // enter just before the target container's left edge. The whole
+    // horizontal + vertical journey between those two points travels
+    // through the empty gap between families — nowhere a card could be —
+    // so no extra "safe lane" detour is needed to dodge anything; turnX1
+    // and turnX2 alone are already enough to guarantee a clean path.
     const GUTTER_HALF = (CLUSTER_COLUMN_WIDTH - NODE_WIDTH) / 2;
-    const CROSS_CLUSTER_MARGIN = 16;
 
     function crossClusterRoute(
       source: string,
       target: string,
       laneOffset: number = 0
-    ): { turnX1: number; turnX2: number; safeY: number } | undefined {
+    ): { turnX1: number; turnX2: number } | undefined {
       // A collapsed group renders as a single pill, not a column of member
-      // rows — there's nothing for the safe-lane detour to protect against
-      // on that side. Without this check, the OTHER side's real container
-      // bounds were still used as a fallback reference (meant for "real
-      // container → loose person" cases), so even a connection to a
-      // collapsed pill took the same big detour. Bail out here and let
-      // CrossClusterEdge fall back to its plain smoothstep instead.
+      // rows — there's no gutter to route through on that side. Bail out
+      // here and let CrossClusterEdge fall back to its plain smoothstep
+      // instead.
       if (source.startsWith("group-") || target.startsWith("group-")) return undefined;
 
       const sourceNode = nodeById.get(source);
@@ -301,61 +294,19 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
       if (!sourceBounds && !targetBounds) return undefined;
 
-      // The container's own RIGHT EDGE, not the source's own local column
-      // position. A child (rightmost local column) happens to already
-      // sit near that edge, so their turn point looked fine before — but
-      // a parent (leftmost local column) would only clear ITS OWN column,
-      // landing the turn — and the vertical run after it — in the narrow
-      // gutter between parents and children, hugging right past the
-      // children's cards instead of exiting past the whole family. Every
-      // source, regardless of which internal column it starts in, has to
-      // reach the container's true edge to cross over anyway.
       const turnX1 = sourceBounds ? sourceBounds.right + GUTTER_HALF : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
       const turnX2 = targetBounds
         ? targetBounds.left + targetNode.position.x - GUTTER_HALF
         : targetNode.position.x - GUTTER_HALF;
 
-      // Clear only the SOURCE container's own rows — that's where the
-      // "an unrelated sibling shares this row" problem actually
-      // originates, and the horizontal safe-lane travel never enters
-      // either container's internal column space anyway (turnX1/turnX2
-      // sit in the gutter just outside each one). Clearing the TARGET's
-      // full span too — as this first did — over-detours whenever the
-      // two containers differ a lot in height, since it then has to clear
-      // whichever one is taller even when only the source side actually
-      // needs it. Falls back to target's bounds only when source isn't
-      // inside a container at all.
-      const referenceBounds = sourceBounds ?? targetBounds!;
-      const aboveY = referenceBounds.top - CROSS_CLUSTER_MARGIN;
-      const belowY = referenceBounds.bottom + CROSS_CLUSTER_MARGIN;
-
-      // Lane choice is decided at the CONTAINER level, not per individual
-      // member — otherwise two people from the same family (e.g. both
-      // parents) heading to the same destination can each pick their
-      // OWN nearest lane based on their own row, and end up diverging
-      // instead of traveling together as one bundle (this is exactly
-      // what was happening: Celia sits near the top of Antonio so her
-      // line went "above", Mateo sits near the bottom so his went
-      // "below" — same source family, same destination, two different
-      // paths). Comparing the two CONTAINERS' centers instead gives one
-      // consistent answer for every edge sharing that container pair,
-      // regardless of which specific member is the actual source.
-      const sourceCenterY = (referenceBounds.top + referenceBounds.bottom) / 2;
-      const targetCenterY = targetBounds
-        ? (targetBounds.top + targetBounds.bottom) / 2
-        : targetNode.position.y;
-      const safeY = targetCenterY <= sourceCenterY ? aboveY : belowY;
-
-      // safeY and turnX1 stay IDENTICAL for every edge sharing this same
+      // turnX1 stays IDENTICAL for every edge sharing this same
       // source/target container pair — that's what makes them travel as
-      // one visible trunk for the long shared leg, exactly like within a
+      // one visible trunk for the shared leg, exactly like within a
       // single family. The lane offset only nudges turnX2 — where the
       // line turns to descend into the target — so a different subtype
       // still splits off, but only in a short final fork right before
-      // reaching the target, not as two parallel highways for the whole
-      // route (which is what offsetting safeY did instead, undoing the
-      // "one shared trunk" behavior this was supposed to preserve).
-      return { turnX1, turnX2: turnX2 + laneOffset, safeY };
+      // reaching the target.
+      return { turnX1, turnX2: turnX2 + laneOffset };
     }
 
     // A sibling clique stores a pairwise DB row for EVERY combination (a
