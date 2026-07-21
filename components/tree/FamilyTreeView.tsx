@@ -323,7 +323,57 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       return { turnX1, turnX2, safeY };
     }
 
-    const flowEdges: Edge[] = layout.edges.map((e) => {
+    // A sibling clique stores a pairwise DB row for EVERY combination (a
+    // new sibling gets linked individually to everyone already in the
+    // group, not just their nearest neighbor) — with 6 siblings that's up
+    // to 15 rows. Drawing all of them in the same stacked column is fine
+    // when they're all the same subtype (they fuse into one clean line),
+    // but once subtypes differ, several overlapping lines pile up in the
+    // same band with no way to tell which specific pair each one
+    // connects. The adjacent-in-birth-order chain already conveys the
+    // full picture — A-B full + B-C half implies A-C is at least half —
+    // so only THOSE edges need to render; every "skip" edge between
+    // non-adjacent siblings is pure redundant clutter. Restricted to the
+    // same-container case, where the stacked-column overlap actually
+    // happens; cross-container sibling edges are already sparse.
+    const siblingEdges = layout.edges.filter((e) => e.data.kind === "sibling_of");
+    const keepSiblingEdgeId = new Set<string>();
+    const membersByContainer = new Map<string, Set<string>>();
+    for (const e of siblingEdges) {
+      const c1 = containerByNodeId.get(e.source);
+      const c2 = containerByNodeId.get(e.target);
+      if (c1 && c1 === c2) {
+        const set = membersByContainer.get(c1) ?? new Set<string>();
+        set.add(e.source);
+        set.add(e.target);
+        membersByContainer.set(c1, set);
+      } else {
+        keepSiblingEdgeId.add(e.id); // cross-container: sparse already, keep as-is
+      }
+    }
+    for (const [containerId, memberIds] of membersByContainer.entries()) {
+      const sorted = Array.from(memberIds).sort(
+        (a, b) => (nodeById.get(a)?.position.y ?? 0) - (nodeById.get(b)?.position.y ?? 0)
+      );
+      const adjacentPairKeys = new Set<string>();
+      for (let i = 0; i < sorted.length - 1; i++) {
+        adjacentPairKeys.add(`${sorted[i]}|${sorted[i + 1]}`);
+        adjacentPairKeys.add(`${sorted[i + 1]}|${sorted[i]}`);
+      }
+      for (const e of siblingEdges) {
+        if (
+          containerByNodeId.get(e.source) === containerId &&
+          containerByNodeId.get(e.target) === containerId &&
+          adjacentPairKeys.has(`${e.source}|${e.target}`)
+        ) {
+          keepSiblingEdgeId.add(e.id);
+        }
+      }
+    }
+
+    const flowEdges: Edge[] = layout.edges
+      .filter((e) => e.data.kind !== "sibling_of" || keepSiblingEdgeId.has(e.id))
+      .map((e) => {
       if (e.data.kind === "parent_of") {
         const subtype = e.data.parentSubtype ?? "biological";
 
@@ -436,7 +486,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         type: "default",
         style: { strokeWidth: 1.5, stroke: "#00c2b0" },
       };
-    });
+      });
 
     return { nodes: flowNodes, edges: flowEdges };
   }, [persons, pets, relationships, petRelationships, familyGroups, collapsedKeys]);
