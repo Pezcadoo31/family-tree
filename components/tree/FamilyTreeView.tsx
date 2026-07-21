@@ -156,10 +156,24 @@ function CrossClusterEdge({
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
+// Straight two-segment step for sibling hub spokes: exit horizontally to
+// the junction's own X (== targetX, since the invisible junction node
+// sits exactly at turnX1), then a vertical run at THAT shared X into the
+// junction. Guarantees every spoke bends at the identical X regardless
+// of how far its member's row is from the junction — the built-in
+// `type: "smoothstep"` was picking its own bend point per edge
+// independently, so spokes from far-away rows (Eduardo, Mateo) could
+// overshoot past where the others converged.
+function SiblingSpokeEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd }: EdgeProps) {
+  const path = `M ${sourceX},${sourceY} L ${targetX},${sourceY} L ${targetX},${targetY}`;
+  return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
+}
+
 const edgeTypes = {
   parentTrunk: ParentTrunkEdge,
   crossClusterStep: CrossClusterEdge,
   siblingTrunk: SiblingTrunkEdge,
+  siblingSpoke: SiblingSpokeEdge,
 };
 
 // ============================================================================
@@ -529,7 +543,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: junctionId,
           sourceHandle: "source-right",
           targetHandle: "target-left",
-          type: "smoothstep",
+          type: "siblingSpoke",
           style: {
             strokeWidth: 1.5,
             stroke: colorBySiblingSubtype[subtype] ?? colorBySiblingSubtype.full,
