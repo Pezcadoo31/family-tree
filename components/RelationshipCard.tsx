@@ -162,7 +162,13 @@ export function RelationshipCard({ relationships, allPersons, onDeleted, viewing
                       </span>
                     )}
                     {first.type === "sibling_of" && subtypeLabel && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-full text-violet-300">
+                      // inline-block (no el `inline` por defecto de un span) para
+                      // que text-center sí controle su propio texto cuando envuelve
+                      // a 2 líneas — un span inline normal no establece ese
+                      // contexto de alineación por sí mismo. rounded-lg en vez de
+                      // rounded-full porque una píldora totalmente redonda se ve
+                      // deforme cuando la caja crece de alto por el wrap.
+                      <span className="inline-block text-center text-[10px] leading-tight px-1.5 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-lg text-violet-300">
                         {subtypeLabel}
                       </span>
                     )}
