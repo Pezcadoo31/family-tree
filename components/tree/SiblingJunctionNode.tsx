@@ -11,10 +11,14 @@ import { Handle, Position } from "@xyflow/react";
 // ============================================================================
 
 export function SiblingJunctionNode() {
+  // Invisible on purpose — the lines converging here should read as one
+  // continuous bridge, not as pointing at a visible dot. The node itself
+  // still exists (React Flow needs a real node for the spokes/bridge to
+  // attach to), it's just not rendered.
   return (
     <>
       <Handle type="target" position={Position.Left} id="target-left" className="opacity-0!" />
-      <div className="w-2.5 h-2.5 rounded-full bg-zinc-500/70 border border-zinc-400/40" />
+      <div className="w-2.5 h-2.5" />
       <Handle type="source" position={Position.Right} id="source-right" className="opacity-0!" />
     </>
   );
