@@ -57,11 +57,27 @@ const PARENT_SUBTYPE_OFFSET: Record<string, number> = {
   step: -8,
   foster: 16,
 };
+// Cross-container connections are inherently viewed more zoomed out (two
+// full family boxes have to fit on screen at once) — the same offset
+// that reads clearly on a single trunk becomes a couple screen-pixels,
+// effectively invisible. Confirmed via fiber: the offset WAS applying
+// correctly (8px real difference), just too small to perceive at that
+// zoom level — not a propagation bug, purely a magnitude one.
+const PARENT_SUBTYPE_OFFSET_CROSS: Record<string, number> = {
+  biological: 0,
+  adoptive: 28,
+  step: -28,
+  foster: 56,
+};
+// Wider spacing than the parent-trunk lanes above — this isn't a brief
+// kink on a short adjacent line anymore, it's a full parallel lane
+// running the height of the sibling trunk, so it needs enough separation
+// to read as clearly distinct at normal zoom.
 const SIBLING_SUBTYPE_OFFSET: Record<string, number> = {
   full: 0,
-  half: 6,
-  step: -6,
-  adoptive: 12,
+  half: 12,
+  step: -12,
+  adoptive: 24,
 };
 
 function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
@@ -71,17 +87,17 @@ function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd,
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
-// Same idea for same-container sibling/spouse pairs: a plain straight line
-// when offset is 0 (the common case, unchanged), or a short diagonal kink
-// at the midpoint when a different subtype needs its own lane — subtle at
-// this short distance, but enough to read as "not the same line".
-function OffsetStraightEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
-  const offset = (data as { offset?: number } | undefined)?.offset ?? 0;
-  if (offset === 0) {
-    return <BaseEdge path={`M ${sourceX},${sourceY} L ${targetX},${targetY}`} style={style} markerEnd={markerEnd} />;
-  }
-  const midY = sourceY + (targetY - sourceY) / 2;
-  const path = `M ${sourceX},${sourceY} L ${sourceX + offset},${midY} L ${targetX},${targetY}`;
+// Same idea as ParentTrunkEdge, rotated 90°: the shared spine here runs
+// VERTICAL (siblings are stacked in one column, not side by side across
+// two), positioned via a per-subtype lane offset from the column's own X
+// instead of a horizontal midpoint. Consecutive same-subtype edges share
+// the exact same trunkX, so their vertical segments line up end-to-end
+// and read as one continuous trunk — a different subtype gets its own
+// parallel lane instead of overlapping it.
+function SiblingTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
+  const trunkOffset = (data as { trunkOffset?: number } | undefined)?.trunkOffset ?? 0;
+  const trunkX = sourceX + trunkOffset;
+  const path = `M ${sourceX},${sourceY} L ${trunkX},${sourceY} L ${trunkX},${targetY} L ${targetX},${targetY}`;
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
@@ -141,7 +157,7 @@ function CrossClusterEdge({
 const edgeTypes = {
   parentTrunk: ParentTrunkEdge,
   crossClusterStep: CrossClusterEdge,
-  offsetStraight: OffsetStraightEdge,
+  siblingTrunk: SiblingTrunkEdge,
 };
 
 // ============================================================================
@@ -275,7 +291,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
 
     function crossClusterRoute(
       source: string,
-      target: string
+      target: string,
+      laneOffset: number = 0
     ): { turnX1: number; turnX2: number; safeY: number } | undefined {
       // A collapsed group renders as a single pill, not a column of member
       // rows — there's nothing for the safe-lane detour to protect against
@@ -303,8 +320,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         ? targetBounds.left + targetNode.position.x - GUTTER_HALF
         : targetNode.position.x - GUTTER_HALF;
 
-      const sourceAbsY = sourceBounds ? sourceBounds.top + sourceNode.position.y : sourceNode.position.y;
-
       // Clear only the SOURCE container's own rows — that's where the
       // "an unrelated sibling shares this row" problem actually
       // originates, and the horizontal safe-lane travel never enters
@@ -318,9 +333,34 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const referenceBounds = sourceBounds ?? targetBounds!;
       const aboveY = referenceBounds.top - CROSS_CLUSTER_MARGIN;
       const belowY = referenceBounds.bottom + CROSS_CLUSTER_MARGIN;
-      const safeY = Math.abs(sourceAbsY - aboveY) <= Math.abs(belowY - sourceAbsY) ? aboveY : belowY;
 
-      return { turnX1, turnX2, safeY };
+      // Lane choice is decided at the CONTAINER level, not per individual
+      // member — otherwise two people from the same family (e.g. both
+      // parents) heading to the same destination can each pick their
+      // OWN nearest lane based on their own row, and end up diverging
+      // instead of traveling together as one bundle (this is exactly
+      // what was happening: Celia sits near the top of Antonio so her
+      // line went "above", Mateo sits near the bottom so his went
+      // "below" — same source family, same destination, two different
+      // paths). Comparing the two CONTAINERS' centers instead gives one
+      // consistent answer for every edge sharing that container pair,
+      // regardless of which specific member is the actual source.
+      const sourceCenterY = (referenceBounds.top + referenceBounds.bottom) / 2;
+      const targetCenterY = targetBounds
+        ? (targetBounds.top + targetBounds.bottom) / 2
+        : targetNode.position.y;
+      const safeY = targetCenterY <= sourceCenterY ? aboveY : belowY;
+
+      // safeY and turnX1 stay IDENTICAL for every edge sharing this same
+      // source/target container pair — that's what makes them travel as
+      // one visible trunk for the long shared leg, exactly like within a
+      // single family. The lane offset only nudges turnX2 — where the
+      // line turns to descend into the target — so a different subtype
+      // still splits off, but only in a short final fork right before
+      // reaching the target, not as two parallel highways for the whole
+      // route (which is what offsetting safeY did instead, undoing the
+      // "one shared trunk" behavior this was supposed to preserve).
+      return { turnX1, turnX2: turnX2 + laneOffset, safeY };
     }
 
     // A sibling clique stores a pairwise DB row for EVERY combination (a
@@ -336,38 +376,86 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     // non-adjacent siblings is pure redundant clutter. Restricted to the
     // same-container case, where the stacked-column overlap actually
     // happens; cross-container sibling edges are already sparse.
+    // Same redundancy problem as before, but it doesn't stop at a
+    // container's edge: a sibling clique stores a DB row for every
+    // combination regardless of where each member ends up rendered, so
+    // once one sibling (Elida) moves to her own container, EVERY leftover
+    // combination row between her and an origin-family sibling was being
+    // treated as "cross-container, assume sparse, keep as-is" — when
+    // there could be several of those pointing at her, each drawing its
+    // own full safe-lane detour stacked on top of the others (that's the
+    // giant box: several correct-but-redundant routes overlapping, not
+    // one route calculated wrong).
+    //
+    // Fix: group by the REAL sibling clique (union-find over every
+    // sibling_of edge, regardless of container), not by container. Sort
+    // each clique by actual birth_date — position.y isn't comparable
+    // once members span different containers (nested coordinates are
+    // relative to their own container's origin) — and keep only
+    // chain-adjacent pairs, same as before, just clique-wide instead of
+    // container-wide.
     const siblingEdges = layout.edges.filter((e) => e.data.kind === "sibling_of");
-    const keepSiblingEdgeId = new Set<string>();
-    const membersByContainer = new Map<string, Set<string>>();
-    for (const e of siblingEdges) {
+
+    // Keep only a MINIMUM SPANNING TREE of the real edges that exist —
+    // not a chain reconstructed from an external sort. Trying to infer
+    // "who's adjacent" via birth_date (or Y position, before that) is
+    // fragile: if a date is missing, or the DB's actual sibling_of rows
+    // don't happen to connect people in that exact inferred order, the
+    // pair we THINK is adjacent may not be a real row at all — so it
+    // simply doesn't render, silently dropping a connection that was
+    // needed. A spanning tree only ever discards an edge when a DIFFERENT
+    // real edge already connects those two people through someone else —
+    // so nothing that's actually needed can be lost, and it needs no
+    // assumption about container, birth date, or any other ordering.
+    const spanningUF = new Map<string, string>();
+    function findSpanningRoot(x: string): string {
+      if (!spanningUF.has(x)) spanningUF.set(x, x);
+      let root = x;
+      while (spanningUF.get(root) !== root) root = spanningUF.get(root)!;
+      let cur = x;
+      while (spanningUF.get(cur) !== root) {
+        const next = spanningUF.get(cur)!;
+        spanningUF.set(cur, root);
+        cur = next;
+      }
+      return root;
+    }
+
+    // Union-Find alone picks edges in whatever order they happen to
+    // appear (DB insertion order) — it correctly avoids CYCLES, but has
+    // no preference for which valid tree it builds, so it can just as
+    // easily keep a long "skip" edge (Eduardo↔Mateo, cutting through 3
+    // cards in between) as the short adjacent ones, as long as it
+    // connects two components it hasn't joined yet. This is Kruskal's
+    // MST algorithm: sort edges by "visual distance" cost first, THEN
+    // run the same Union-Find — cheap adjacent-in-column pairs get
+    // first pick, so the chain reconstructs itself naturally, and an
+    // expensive edge (a big row gap, or crossing containers entirely)
+    // only gets used as a last resort when nothing cheaper can connect
+    // that part of the clique.
+    function siblingEdgeCost(e: (typeof siblingEdges)[number]): number {
       const c1 = containerByNodeId.get(e.source);
       const c2 = containerByNodeId.get(e.target);
-      if (c1 && c1 === c2) {
-        const set = membersByContainer.get(c1) ?? new Set<string>();
-        set.add(e.source);
-        set.add(e.target);
-        membersByContainer.set(c1, set);
-      } else {
-        keepSiblingEdgeId.add(e.id); // cross-container: sparse already, keep as-is
+      const comparablePositions = c1 === c2; // same container, or both loose top-level
+      if (comparablePositions) {
+        const y1 = nodeById.get(e.source)?.position.y ?? 0;
+        const y2 = nodeById.get(e.target)?.position.y ?? 0;
+        return Math.abs(y1 - y2);
       }
+      return Number.MAX_SAFE_INTEGER; // cross-container: last resort only
     }
-    for (const [containerId, memberIds] of membersByContainer.entries()) {
-      const sorted = Array.from(memberIds).sort(
-        (a, b) => (nodeById.get(a)?.position.y ?? 0) - (nodeById.get(b)?.position.y ?? 0)
-      );
-      const adjacentPairKeys = new Set<string>();
-      for (let i = 0; i < sorted.length - 1; i++) {
-        adjacentPairKeys.add(`${sorted[i]}|${sorted[i + 1]}`);
-        adjacentPairKeys.add(`${sorted[i + 1]}|${sorted[i]}`);
-      }
-      for (const e of siblingEdges) {
-        if (
-          containerByNodeId.get(e.source) === containerId &&
-          containerByNodeId.get(e.target) === containerId &&
-          adjacentPairKeys.has(`${e.source}|${e.target}`)
-        ) {
-          keepSiblingEdgeId.add(e.id);
-        }
+
+    const sortedSiblingEdges = [...siblingEdges].sort(
+      (a, b) => siblingEdgeCost(a) - siblingEdgeCost(b)
+    );
+
+    const keepSiblingEdgeId = new Set<string>();
+    for (const e of sortedSiblingEdges) {
+      const ra = findSpanningRoot(e.source);
+      const rb = findSpanningRoot(e.target);
+      if (ra !== rb) {
+        spanningUF.set(ra, rb);
+        keepSiblingEdgeId.add(e.id);
       }
     }
 
@@ -410,7 +498,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           type: sameContainer ? "parentTrunk" : "crossClusterStep",
           data: sameContainer
             ? { offset: PARENT_SUBTYPE_OFFSET[subtype] ?? 0 }
-            : crossClusterRoute(e.source, e.target),
+            : crossClusterRoute(e.source, e.target, PARENT_SUBTYPE_OFFSET_CROSS[subtype] ?? 0),
           animated: true,
           style: {
             strokeWidth: 1.5,
@@ -466,10 +554,10 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           target: e.target,
           sourceHandle: sameContainer ? "source-bottom" : "source-right",
           targetHandle: sameContainer ? "target-top" : "target-left",
-          type: sameContainer ? "offsetStraight" : "crossClusterStep",
+          type: sameContainer ? "siblingTrunk" : "crossClusterStep",
           data: sameContainer
-            ? { offset: SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0 }
-            : crossClusterRoute(e.source, e.target),
+            ? { trunkOffset: SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0 }
+            : crossClusterRoute(e.source, e.target, SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0),
           style: {
             strokeWidth: 1.5,
             stroke: color,
