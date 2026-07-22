@@ -587,15 +587,20 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       return bounds.top + (Math.min(...ys) + Math.max(...ys)) / 2;
     }
 
-    // For a sibling clique with a real cross-container connection, build
-    // a visible "hub": every member on the source side gets their OWN
-    // spoke line into a shared junction node, and ONE bridge line
-    // continues from that junction across to the other family — instead
-    // of implying the group connection through a single MST-picked
-    // edge's shared travel-Y. Each spoke uses that specific member's own
-    // REAL sibling_of row to the target (not a fabricated color) — if a
-    // member has no direct row to the target in the data, they're
-    // skipped rather than inventing a relationship that isn't there.
+    // For a sibling clique with real cross-container connections, build
+    // a visible "hub" — ONE PER SOURCE FAMILY, not one per (source,
+    // destination) pair. A source family can bridge to MULTIPLE
+    // different destination families at once (e.g. one sibling moved to
+    // family B, another to family C) — treating each destination as its
+    // own separate hub duplicated the same junction and the same spokes
+    // once per destination, since junction position only ever depended
+    // on the source family, never the target. With two destinations that
+    // meant two junctions stacked exactly on top of each other and 8
+    // spoke lines converging where only 4 unique members exist. Grouping
+    // by source family first fixes that: one junction, one spoke per
+    // member (drawn once, colored by whichever of their real
+    // relationships connects to this hub), and one combined bridge line
+    // per distinct destination fanning out from that same shared point.
     const crossContainerSiblingEdges = siblingEdges.filter(
       (e) => keepSiblingEdgeId.has(e.id) && containerByNodeId.get(e.source) !== containerByNodeId.get(e.target)
     );
@@ -610,21 +615,23 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     const junctionNodes: Node[] = [];
     const junctionEdges: Edge[] = [];
     const suppressedSiblingEdgeIds = new Set<string>();
-    const handledHubs = new Set<string>();
 
-    for (const crossEdge of crossContainerSiblingEdges) {
-      suppressedSiblingEdgeIds.add(crossEdge.id);
-
-      const sourceContainerId = containerByNodeId.get(crossEdge.source);
+    const crossEdgesBySourceContainer = new Map<string, typeof crossContainerSiblingEdges>();
+    for (const e of crossContainerSiblingEdges) {
+      const sourceContainerId = containerByNodeId.get(e.source);
       if (!sourceContainerId) continue;
-      const hubKey = `${sourceContainerId}->${crossEdge.target}`;
-      if (handledHubs.has(hubKey)) continue;
-      handledHubs.add(hubKey);
+      const list = crossEdgesBySourceContainer.get(sourceContainerId) ?? [];
+      list.push(e);
+      crossEdgesBySourceContainer.set(sourceContainerId, list);
+    }
+
+    for (const [sourceContainerId, edgesFromThisSource] of crossEdgesBySourceContainer.entries()) {
+      for (const e of edgesFromThisSource) suppressedSiblingEdgeIds.add(e.id);
 
       const bounds = containerBoundsById.get(sourceContainerId);
       if (!bounds) continue;
 
-      const root = findSpanningRoot(crossEdge.source);
+      const root = findSpanningRoot(edgesFromThisSource[0].source);
       const members = new Set<string>();
       for (const e of siblingEdges) {
         for (const cand of [e.source, e.target]) {
@@ -645,9 +652,9 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       }
       if (members.size === 0) continue;
 
-      const junctionY = containerJunctionY(crossEdge.source) ?? (bounds.top + bounds.bottom) / 2;
+      const junctionY = containerJunctionY(edgesFromThisSource[0].source) ?? (bounds.top + bounds.bottom) / 2;
       const turnX1 = bounds.right + GUTTER_HALF;
-      const junctionId = `sibling-junction-${sourceContainerId}-${crossEdge.target}`;
+      const junctionId = `sibling-junction-${sourceContainerId}`;
 
       junctionNodes.push({
         id: junctionId,
@@ -656,16 +663,21 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         data: {},
       });
 
+      // Every distinct destination this source family bridges to, in
+      // this render — used both to pick each member's representative
+      // color and to know how many bridge lines to fan out below.
+      const hubTargets = new Set(edgesFromThisSource.map((e) => e.target));
+
       for (const memberId of members) {
-        const directEdge = siblingEdges.find(
+        const representativeEdge = siblingEdges.find(
           (e) =>
-            (e.source === memberId && e.target === crossEdge.target) ||
-            (e.source === crossEdge.target && e.target === memberId)
+            (e.source === memberId && hubTargets.has(e.target)) ||
+            (e.target === memberId && hubTargets.has(e.source))
         );
-        if (!directEdge) continue; // no real row for this member — don't invent one
-        const subtype = directEdge.data.siblingSubtype ?? "full";
+        if (!representativeEdge) continue; // no real row to any hub destination — don't invent one
+        const subtype = representativeEdge.data.siblingSubtype ?? "full";
         junctionEdges.push({
-          id: `${directEdge.id}-spoke`,
+          id: `${junctionId}-spoke-${memberId}`,
           source: memberId,
           target: junctionId,
           sourceHandle: "source-right",
@@ -679,40 +691,44 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         });
       }
 
-      const targetContainerId = containerByNodeId.get(crossEdge.target);
-      const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
-      const targetNode = nodeById.get(crossEdge.target);
-      const bridgeSubtype = crossEdge.data.siblingSubtype ?? "full";
-      // This bridge is a SIBLING connection, not a parent one — it was
-      // never asked to fuse with Celia/Mateo's line into Elida (only
-      // parent-with-parent was asked to fuse). Without its own subtype
-      // lane here, it defaulted to the exact same zero-offset entry point
-      // parent_of intentionally uses, so a sibling bridge and a parent
-      // line converging on the same person could land on an identical
-      // final approach — confirmed via fiber: both traced through
-      // y=210.8 pixel-for-pixel, and the bridge's sparse dash pattern
-      // (1px on, 4px off) all but disappeared against the solid parent
-      // line occupying the same row.
-      const turnX2 = targetNode
-        ? (targetBounds
-            ? targetBounds.left + targetNode.position.x - GUTTER_HALF
-            : targetNode.position.x - GUTTER_HALF) + (SIBLING_SUBTYPE_OFFSET[bridgeSubtype] ?? 0)
-        : turnX1;
+      const distinctTargetEdges = new Map<string, (typeof edgesFromThisSource)[number]>();
+      for (const e of edgesFromThisSource) {
+        if (!distinctTargetEdges.has(e.target)) distinctTargetEdges.set(e.target, e);
+      }
 
-      junctionEdges.push({
-        id: `${crossEdge.id}-bridge`,
-        source: junctionId,
-        target: crossEdge.target,
-        sourceHandle: "source-right",
-        targetHandle: "target-left",
-        type: "crossClusterStep",
-        data: { turnX1, turnX2 },
-        style: {
-          strokeWidth: 1.5,
-          stroke: colorBySiblingSubtype[bridgeSubtype] ?? colorBySiblingSubtype.full,
-          strokeDasharray: "1 4",
-        },
-      });
+      for (const [target, crossEdge] of distinctTargetEdges.entries()) {
+        const targetContainerId = containerByNodeId.get(target);
+        const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
+        const targetNode = nodeById.get(target);
+        const bridgeSubtype = crossEdge.data.siblingSubtype ?? "full";
+        // This bridge is a SIBLING connection, not a parent one — it was
+        // never asked to fuse with a parent's line into the same person
+        // (only parent-with-parent was asked to fuse). Without its own
+        // subtype lane here, it defaulted to the exact same zero-offset
+        // entry point parent_of intentionally uses, so a sibling bridge
+        // and a parent line converging on the same person could land on
+        // an identical final approach.
+        const turnX2 = targetNode
+          ? (targetBounds
+              ? targetBounds.left + targetNode.position.x - GUTTER_HALF
+              : targetNode.position.x - GUTTER_HALF) + (SIBLING_SUBTYPE_OFFSET[bridgeSubtype] ?? 0)
+          : turnX1;
+
+        junctionEdges.push({
+          id: `${crossEdge.id}-bridge`,
+          source: junctionId,
+          target,
+          sourceHandle: "source-right",
+          targetHandle: "target-left",
+          type: "crossClusterStep",
+          data: { turnX1, turnX2 },
+          style: {
+            strokeWidth: 1.5,
+            stroke: colorBySiblingSubtype[bridgeSubtype] ?? colorBySiblingSubtype.full,
+            strokeDasharray: "1 4",
+          },
+        });
+      }
     }
 
     const flowEdges: Edge[] = layout.edges
