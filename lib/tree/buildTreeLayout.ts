@@ -253,103 +253,164 @@ export function buildTreeLayout(
   }
 
   // --------------------------------------------------------------
-  // 6) Person nodes — skip anyone who belongs to ANY family group
-  //    (collapsed → represented by the pill; expanded → represented
-  //    inside its cluster container instead)
+  // Chronological ordering — a date-based comparator shared by every
+  // level (loose persons, family groups, pets): earlier date first,
+  // undated items sort last and keep their original relative order
+  // (Array.prototype.sort is stable) rather than being guessed into a
+  // position we don't actually have evidence for.
   // --------------------------------------------------------------
-  const byGeneration = new Map<number, unknown[]>();
+  function compareByDate(dateA: string | undefined, dateB: string | undefined): number {
+    if (dateA === undefined && dateB === undefined) return 0;
+    if (dateA === undefined) return 1;
+    if (dateB === undefined) return -1;
+    return dateA.localeCompare(dateB);
+  }
+
+  // A family's "start" date, in priority order: the marriage/union date
+  // between its parents (spouse_of.start_date) if one is recorded, else
+  // the earliest parent birth date as a proxy for "which family line
+  // started earlier". Groups with neither sort to the end of their
+  // column, same as any other undated item.
+  function familySortDate(g: FamilyGroup): string | undefined {
+    let earliestUnion: string | undefined;
+    for (let i = 0; i < g.parents.length; i++) {
+      for (let j = i + 1; j < g.parents.length; j++) {
+        const a = g.parents[i].id;
+        const b = g.parents[j].id;
+        const rel = spouseOf.find(
+          (r) => (r.person_a_id === a && r.person_b_id === b) || (r.person_a_id === b && r.person_b_id === a)
+        );
+        if (rel?.start_date && (!earliestUnion || rel.start_date < earliestUnion)) {
+          earliestUnion = rel.start_date;
+        }
+      }
+    }
+    if (earliestUnion) return earliestUnion;
+
+    const parentBirths = g.parents
+      .map((p) => p.birth_date)
+      .filter((d): d is string => !!d)
+      .sort();
+    return parentBirths[0];
+  }
+
+  // --------------------------------------------------------------
+  // 6+7) Loose persons AND family groups, MERGED into one chronologically
+  //    sorted list per column — a family group and a standalone person at
+  //    the same generation both compete for the same vertical order by
+  //    date, instead of always stacking every loose person above every
+  //    family (the old two-separate-passes behavior had no chronological
+  //    meaning, just "ungrouped first, then grouped").
+  // --------------------------------------------------------------
+  type ColumnItem =
+    | { kind: "person"; person: Person; sortDate: string | undefined }
+    | { kind: "group"; group: FamilyGroup; sortDate: string | undefined };
+
+  const columnItems = new Map<number, ColumnItem[]>();
+  function pushColumnItem(gen: number, item: ColumnItem) {
+    const list = columnItems.get(gen) ?? [];
+    list.push(item);
+    columnItems.set(gen, list);
+  }
+
   for (const p of persons) {
     if (personToGroupKey.has(p.id)) continue;
     const gen = generation.get(p.id) ?? 0;
-    const list = byGeneration.get(gen) ?? [];
-    list.push(p);
-    byGeneration.set(gen, list);
+    pushColumnItem(gen, { kind: "person", person: p, sortDate: p.birth_date ?? undefined });
+  }
+  for (const g of familyGroups) {
+    const anchorGen = anchorGenByGroupKey.get(g.key) ?? 0;
+    pushColumnItem(anchorGen, { kind: "group", group: g, sortDate: familySortDate(g) });
+  }
+  for (const list of columnItems.values()) {
+    list.sort((a, b) => compareByDate(a.sortDate, b.sortDate));
   }
 
   const nodes: TreeLayout["nodes"] = [];
+  // How many row-slots each column has used so far — the loose-pets pass
+  // below continues from here instead of restarting at 0 and colliding.
+  const rowsUsedByGeneration = new Map<number, number>();
 
-  for (const [gen, list] of byGeneration.entries()) {
-    list.forEach((p, index) => {
-      const person = p as Person;
-      nodes.push({
-        id: person.id,
-        type: "personNode",
-        position: { x: colX.get(gen) ?? gen * COLUMN_WIDTH, y: index * ROW_HEIGHT },
-        data: { id: person.id, type: "person", person, generation: gen },
-      });
-    });
-  }
+  for (const [gen, list] of columnItems.entries()) {
+    const x = colX.get(gen) ?? gen * COLUMN_WIDTH;
+    let rowCursor = 0;
 
-  // --------------------------------------------------------------
-  // 7) One node per family group — a compact pill if collapsed, or a
-  //    full container with nested person/pet nodes if expanded.
-  // --------------------------------------------------------------
-  for (const g of familyGroups) {
-    const anchorGen = anchorGenByGroupKey.get(g.key) ?? 0;
-    const list = byGeneration.get(anchorGen) ?? [];
-    const index = list.length;
-    const x = colX.get(anchorGen) ?? anchorGen * COLUMN_WIDTH;
-
-    if (collapsedGroupKeys.has(g.key)) {
-      byGeneration.set(anchorGen, [...list, {}]); // reserve 1 row slot
-      nodes.push({
-        id: `group-${g.key}`,
-        type: "familyGroupNode",
-        position: { x, y: index * ROW_HEIGHT },
-        data: { id: g.key, type: "group", group: g, generation: anchorGen },
-      });
-      continue;
-    }
-
-    const cluster = clusterLayouts.get(g.key);
-    if (!cluster) continue;
-
-    const slotsUsed = Math.max(1, Math.ceil(cluster.height / ROW_HEIGHT));
-    byGeneration.set(anchorGen, [...list, ...Array(slotsUsed).fill({})]); // reserve N row slots
-
-    const containerId = `cluster-${g.key}`;
-    nodes.push({
-      id: containerId,
-      type: "familyContainerNode",
-      position: { x, y: index * ROW_HEIGHT },
-      style: { width: cluster.width, height: cluster.height },
-      data: { id: g.key, type: "cluster", group: g, generation: anchorGen, width: cluster.width, height: cluster.height },
-    });
-
-    const personById = new Map([...g.parents, ...g.children].map((p) => [p.id, p]));
-    const petById = new Map(g.pets.map((p) => [p.id, p]));
-
-    for (const member of cluster.members) {
-      if (member.kind === "person") {
-        const person = personById.get(member.id);
-        if (!person) continue;
+    for (const item of list) {
+      if (item.kind === "person") {
         nodes.push({
-          id: person.id,
+          id: item.person.id,
           type: "personNode",
-          position: member.localPosition,
-          parentId: containerId,
-          extent: "parent",
-          data: { id: person.id, type: "person", person, generation: generation.get(person.id) ?? anchorGen },
+          position: { x, y: rowCursor * ROW_HEIGHT },
+          data: { id: item.person.id, type: "person", person: item.person, generation: gen },
         });
-      } else {
-        const petId = member.id.replace(/^pet-/, "");
-        const pet = petById.get(petId);
-        if (!pet) continue;
+        rowCursor += 1;
+        continue;
+      }
+
+      const g = item.group;
+      if (collapsedGroupKeys.has(g.key)) {
         nodes.push({
-          id: `pet-${pet.id}`,
-          type: "petNode",
-          position: member.localPosition,
-          parentId: containerId,
-          extent: "parent",
-          data: { id: pet.id, type: "pet", pet, generation: anchorGen },
+          id: `group-${g.key}`,
+          type: "familyGroupNode",
+          position: { x, y: rowCursor * ROW_HEIGHT },
+          data: { id: g.key, type: "group", group: g, generation: gen },
         });
+        rowCursor += 1;
+        continue;
+      }
+
+      const cluster = clusterLayouts.get(g.key);
+      if (!cluster) continue;
+
+      const slotsUsed = Math.max(1, Math.ceil(cluster.height / ROW_HEIGHT));
+      const containerId = `cluster-${g.key}`;
+      nodes.push({
+        id: containerId,
+        type: "familyContainerNode",
+        position: { x, y: rowCursor * ROW_HEIGHT },
+        style: { width: cluster.width, height: cluster.height },
+        data: { id: g.key, type: "cluster", group: g, generation: gen, width: cluster.width, height: cluster.height },
+      });
+      rowCursor += slotsUsed;
+
+      const personById = new Map([...g.parents, ...g.children].map((p) => [p.id, p]));
+      const petById = new Map(g.pets.map((p) => [p.id, p]));
+
+      for (const member of cluster.members) {
+        if (member.kind === "person") {
+          const person = personById.get(member.id);
+          if (!person) continue;
+          nodes.push({
+            id: person.id,
+            type: "personNode",
+            position: member.localPosition,
+            parentId: containerId,
+            extent: "parent",
+            data: { id: person.id, type: "person", person, generation: generation.get(person.id) ?? gen },
+          });
+        } else {
+          const petId = member.id.replace(/^pet-/, "");
+          const pet = petById.get(petId);
+          if (!pet) continue;
+          nodes.push({
+            id: `pet-${pet.id}`,
+            type: "petNode",
+            position: member.localPosition,
+            parentId: containerId,
+            extent: "parent",
+            data: { id: pet.id, type: "pet", pet, generation: gen },
+          });
+        }
       }
     }
+
+    rowsUsedByGeneration.set(gen, rowCursor);
   }
 
   // --------------------------------------------------------------
   // 8) Loose pet nodes — skip pets already represented inside a group
-  //    (collapsed pill or expanded cluster)
+  //    (collapsed pill or expanded cluster). Sorted chronologically like
+  //    every other level, by birth date falling back to adoption date.
   // --------------------------------------------------------------
   const petsByGeneration = new Map<number, Pet[]>();
   for (const pet of pets) {
@@ -361,11 +422,14 @@ export function buildTreeLayout(
   }
 
   for (const [gen, list] of petsByGeneration.entries()) {
+    const sortedPets = [...list].sort((a, b) =>
+      compareByDate(a.birth_date ?? a.adoption_date ?? undefined, b.birth_date ?? b.adoption_date ?? undefined)
+    );
     // Continue the row count from wherever persons/groups already left off
     // in this same column, instead of restarting at 0 and colliding.
-    const baseOffset = byGeneration.get(gen)?.length ?? 0;
+    const baseOffset = rowsUsedByGeneration.get(gen) ?? 0;
     const x = colX.get(gen) ?? gen * COLUMN_WIDTH;
-    list.forEach((pet, index) => {
+    sortedPets.forEach((pet, index) => {
       nodes.push({
         id: `pet-${pet.id}`,
         type: "petNode",
