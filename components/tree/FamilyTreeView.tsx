@@ -562,13 +562,23 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const targetContainerId = containerByNodeId.get(crossEdge.target);
       const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
       const targetNode = nodeById.get(crossEdge.target);
+      const bridgeSubtype = crossEdge.data.siblingSubtype ?? "full";
+      // This bridge is a SIBLING connection, not a parent one — it was
+      // never asked to fuse with Celia/Mateo's line into Elida (only
+      // parent-with-parent was asked to fuse). Without its own subtype
+      // lane here, it defaulted to the exact same zero-offset entry point
+      // parent_of intentionally uses, so a sibling bridge and a parent
+      // line converging on the same person could land on an identical
+      // final approach — confirmed via fiber: both traced through
+      // y=210.8 pixel-for-pixel, and the bridge's sparse dash pattern
+      // (1px on, 4px off) all but disappeared against the solid parent
+      // line occupying the same row.
       const turnX2 = targetNode
-        ? targetBounds
-          ? targetBounds.left + targetNode.position.x - GUTTER_HALF
-          : targetNode.position.x - GUTTER_HALF
+        ? (targetBounds
+            ? targetBounds.left + targetNode.position.x - GUTTER_HALF
+            : targetNode.position.x - GUTTER_HALF) + (SIBLING_SUBTYPE_OFFSET[bridgeSubtype] ?? 0)
         : turnX1;
 
-      const bridgeSubtype = crossEdge.data.siblingSubtype ?? "full";
       junctionEdges.push({
         id: `${crossEdge.id}-bridge`,
         source: junctionId,
