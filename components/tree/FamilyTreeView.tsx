@@ -299,6 +299,52 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       containerByNodeId.set(n.id, n.parentId);
     }
 
+    // ==========================================================================
+    // Collapsed-pair relationship priority — when BOTH families involved in
+    // a relationship are collapsed to a pill, showing every real DB row
+    // between them (spouse + each parent_of + each sibling_of + every pet)
+    // clutters the diagram fast as the tree grows. Instead, show exactly
+    // ONE line per pair of pills: whichever relationship kind ranks
+    // highest below. This is purely visual — no relationship is deleted or
+    // altered, and expanding EITHER family restores every real connection
+    // (this filter only ever matches when both endpoints are still
+    // "group-" pills, which stops being true the instant one expands).
+    //
+    // To add a new relationship kind later: add one line here with its
+    // rank. Unlisted kinds sort last automatically (nullish fallback), so
+    // nothing breaks if a kind is added elsewhere before its priority is.
+    // ==========================================================================
+    const COLLAPSED_PAIR_PRIORITY: Record<string, number> = {
+      spouse_of: 1,
+      parent_of: 2,
+      sibling_of: 3,
+      pet_relationship: 4,
+    };
+    function collapsedPairPriority(kind: string): number {
+      return COLLAPSED_PAIR_PRIORITY[kind] ?? 99;
+    }
+    function collapsedPairKey(a: string, b: string): string {
+      return [a, b].sort().join("::");
+    }
+
+    const collapsedPairWinnerId = new Map<string, string>();
+    const collapsedPairBestPriority = new Map<string, number>();
+    for (const e of layout.edges) {
+      if (!e.source.startsWith("group-") || !e.target.startsWith("group-")) continue;
+      if (e.source === e.target) continue;
+      const key = collapsedPairKey(e.source, e.target);
+      const priority = collapsedPairPriority(e.data.kind);
+      const currentBest = collapsedPairBestPriority.get(key);
+      if (currentBest === undefined || priority < currentBest) {
+        collapsedPairBestPriority.set(key, priority);
+        collapsedPairWinnerId.set(key, e.id);
+      }
+    }
+    function isSuppressedByCollapsedPairPriority(e: (typeof layout.edges)[number]): boolean {
+      if (!e.source.startsWith("group-") || !e.target.startsWith("group-")) return false;
+      return collapsedPairWinnerId.get(collapsedPairKey(e.source, e.target)) !== e.id;
+    }
+
     // For a cross-container connection, force the smoothstep's turning
     // point at the SOURCE container's real right edge (the empty gap
     // between families) instead of letting it default to an arbitrary
@@ -671,6 +717,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
 
     const flowEdges: Edge[] = layout.edges
       .filter((e) => e.data.kind !== "sibling_of" || (keepSiblingEdgeId.has(e.id) && !suppressedSiblingEdgeIds.has(e.id)))
+      .filter((e) => !isSuppressedByCollapsedPairPriority(e))
       .map((e) => {
       if (e.data.kind === "parent_of") {
         const subtype = e.data.parentSubtype ?? "biological";
