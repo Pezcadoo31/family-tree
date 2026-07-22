@@ -697,7 +697,14 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         // into an overlapping zigzag instead. Cross-container pairs (rare
         // for parent_of, but possible) keep the angled routing so a
         // distant connection still avoids cutting through unrelated cards.
-        const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
+        // undefined === undefined is true in JS — two collapsed pills (or
+        // any two nodes with no real container) would otherwise be
+        // wrongly treated as "the same family" just because BOTH lack a
+        // container, instead of correctly being treated as unrelated.
+        // Require an actual shared, defined container id.
+        const sourceContainer1 = containerByNodeId.get(e.source);
+        const targetContainer1 = containerByNodeId.get(e.target);
+        const sameContainer = sourceContainer1 !== undefined && sourceContainer1 === targetContainer1;
 
         return {
           id: e.id,
@@ -731,7 +738,13 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         // other), vertical handles force an up-and-over loop that can clip
         // through an unrelated card on the way — horizontal handles face
         // directly toward the target instead.
-        const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
+        // Same false-positive as parent_of above: two collapsed pills
+        // both lack a container, so undefined === undefined was making
+        // them read as "the same family" — this is exactly what produced
+        // the raw diagonal line cutting across unrelated pills.
+        const sourceContainer2 = containerByNodeId.get(e.source);
+        const targetContainer2 = containerByNodeId.get(e.target);
+        const sameContainer = sourceContainer2 !== undefined && sourceContainer2 === targetContainer2;
         return {
           id: e.id,
           source: e.source,
@@ -751,7 +764,10 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         // instead. The dotted pattern is kept for the cross-container
         // case, where there's plenty of length for it. Same reasoning as
         // spouse_of above for the handle switch.
-        const sameContainer = containerByNodeId.get(e.source) === containerByNodeId.get(e.target);
+        // Same false-positive as parent_of/spouse_of above.
+        const sourceContainer3 = containerByNodeId.get(e.source);
+        const targetContainer3 = containerByNodeId.get(e.target);
+        const sameContainer = sourceContainer3 !== undefined && sourceContainer3 === targetContainer3;
 
         // Distinct color PER sibling subtype — full/half/step/adoptive all
         // read as "sibling" (same family of dash treatment) but shouldn't
