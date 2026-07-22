@@ -631,6 +631,18 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const bounds = containerBoundsById.get(sourceContainerId);
       if (!bounds) continue;
 
+      // NOTE: same-container edges among hub members are deliberately
+      // NOT suppressed here (an earlier version of this code did, and it
+      // was wrong). A member's spoke to the junction represents THEIR
+      // relationship to the EXTERNAL destination (e.g. Bernardina→Eduardo,
+      // genuinely "half") — that is a completely different, independently
+      // true relationship from her internal same-container sibling chain
+      // (Bernardina↔Guadalupe↔Mayra↔Mateo, genuinely "full"). They aren't
+      // redundant just because they touch the same person; hiding the
+      // internal chain was silently discarding a correct "full siblings"
+      // relationship in order to avoid a duplication that was never
+      // actually there — confirmed against real stored sibling_subtype
+      // rows, not assumed.
       const root = findSpanningRoot(edgesFromThisSource[0].source);
       const members = new Set<string>();
       for (const e of siblingEdges) {
@@ -638,16 +650,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           if (containerByNodeId.get(cand) === sourceContainerId && findSpanningRoot(cand) === root) {
             members.add(cand);
           }
-        }
-        // Same-container spoke among hub members is replaced by their
-        // individual spoke to the junction — suppress it so no one shows
-        // both a neighbor-chain segment AND a hub spoke.
-        if (
-          containerByNodeId.get(e.source) === sourceContainerId &&
-          containerByNodeId.get(e.target) === sourceContainerId &&
-          findSpanningRoot(e.source) === root
-        ) {
-          suppressedSiblingEdgeIds.add(e.id);
         }
       }
       if (members.size === 0) continue;
