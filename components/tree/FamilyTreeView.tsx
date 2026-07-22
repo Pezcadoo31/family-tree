@@ -338,7 +338,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     function crossClusterRoute(
       source: string,
       target: string,
-      laneOffset: number = 0
+      laneOffset: number = 0,
+      sourceLaneOffset: number = 0
     ): { turnX1: number; turnX2: number; sourceGutterX: number; sourceSafeY: number } | undefined {
       // A collapsed group renders as a single pill, not a column of member
       // rows — there's no gutter to route through on that side. Bail out
@@ -374,8 +375,18 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // independent choice, so every edge from this same container still
       // travels together for their shared leg regardless of which
       // specific person is the source.
+      // sourceLaneOffset gives the escape point its OWN lane, distinct
+      // from wherever this same source's SAME-container trunk (e.g.
+      // Mateo's fan-out to his own biological children) already runs —
+      // otherwise a cross-container line to a stepchild leaves through
+      // nearly the same spot as the trunk to his legitimate children,
+      // reading as one tangled bundle right at the source card. Unlike
+      // laneOffset (which nudges turnX2, near the TARGET), this only
+      // affects the exit near the SOURCE — the shared travel-together
+      // behavior with another parent heading to the same target
+      // (turnX1/turnX2) is untouched.
       const sourceGutterX = sourceBounds
-        ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF
+        ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF + sourceLaneOffset
         : turnX1;
 
       // Which margin to clear (above vs below the source container)
@@ -703,7 +714,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           // `style` below even though the paths overlap exactly.
           data: sameContainer
             ? { offset: PARENT_SUBTYPE_OFFSET[subtype] ?? 0 }
-            : crossClusterRoute(e.source, e.target),
+            : crossClusterRoute(e.source, e.target, undefined, PARENT_SUBTYPE_OFFSET[subtype] ?? 0),
           animated: true,
           style: {
             strokeWidth: 1.5,
