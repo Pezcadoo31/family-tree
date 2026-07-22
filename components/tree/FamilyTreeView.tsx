@@ -377,7 +377,23 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const sourceGutterX = sourceBounds
         ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF
         : turnX1;
-      const sourceSafeY = sourceBounds ? sourceBounds.top - SOURCE_CLEAR_MARGIN : sourceNode.position.y;
+
+      // Which margin to clear (above vs below the source container)
+      // depends on where the TARGET actually sits — not a fixed "always
+      // above" choice. A fixed choice made every edge from the same
+      // source look identical regardless of destination (Mateo's line to
+      // Eduardo and his line to Elida shared the exact same exit and
+      // barely diverged until the very last stretch, even though they
+      // head to two unrelated families). Basing it on the target's
+      // position gives genuine separation for different destinations —
+      // while still fusing correctly for the SAME destination, since two
+      // sources sharing one target (Celia and Mateo, both to Elida) will
+      // always compute the identical answer here.
+      const sourceCenterY = sourceBounds ? (sourceBounds.top + sourceBounds.bottom) / 2 : sourceNode.position.y;
+      const targetCenterY = targetBounds ? (targetBounds.top + targetBounds.bottom) / 2 : targetNode.position.y;
+      const aboveY = sourceBounds ? sourceBounds.top - SOURCE_CLEAR_MARGIN : sourceNode.position.y;
+      const belowY = sourceBounds ? sourceBounds.bottom + SOURCE_CLEAR_MARGIN : sourceNode.position.y;
+      const sourceSafeY = targetCenterY <= sourceCenterY ? aboveY : belowY;
 
       // turnX1 stays IDENTICAL for every edge sharing this same
       // source/target container pair — that's what makes them travel as
