@@ -142,17 +142,24 @@ function CrossClusterEdge({
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
   const { turnX1, turnX2, junctionY } = route;
-  // With junctionY: the shared horizontal leg travels at the SIBLING
-  // GROUP'S vertical center instead of the specific member's own row —
-  // so the crossing reads as coming from the family as a whole, not from
-  // whichever member happened to hold the one real DB connection. Short
-  // vertical corrections at turnX1 (down/up from the real source row to
-  // the center) and turnX2 (from the center to the real target row) stay
-  // in the safe gutter zone, same as the rest of this route.
+  // The initial exit must always move the line AWAY from source (right,
+  // toward turnX1) — never backward. turnX1 normally sits well past the
+  // source (a real card), so this is a no-op for every ordinary edge.
+  // But the sibling hub's junction node has its own source-right handle
+  // positioned slightly to the RIGHT of the node's own X (React Flow
+  // places Position.Left and Position.Right handles at opposite edges of
+  // a node's box) — for that one bridge edge, sourceX can end up already
+  // past turnX1, and tracing to turnX1 from there means briefly doubling
+  // back leftward first. That backward blip was the stray loose segment.
+  // Clamping to whichever is further out removes it without touching
+  // node sizing (which turned out to make React Flow silently stop
+  // rendering connected edges below a measurable size — confirmed via
+  // DOM diffing, not a fix worth relying on).
+  const exitX1 = Math.max(turnX1, sourceX);
   const path =
     junctionY !== undefined
-      ? `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${junctionY} L ${turnX2},${junctionY} L ${turnX2},${targetY} L ${targetX},${targetY}`
-      : `M ${sourceX},${sourceY} L ${turnX1},${sourceY} L ${turnX1},${targetY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
+      ? `M ${sourceX},${sourceY} L ${exitX1},${sourceY} L ${exitX1},${junctionY} L ${turnX2},${junctionY} L ${turnX2},${targetY} L ${targetX},${targetY}`
+      : `M ${sourceX},${sourceY} L ${exitX1},${sourceY} L ${exitX1},${targetY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
