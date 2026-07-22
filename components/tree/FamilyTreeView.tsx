@@ -128,7 +128,9 @@ function CrossClusterEdge({
   markerEnd,
   data,
 }: EdgeProps) {
-  const route = data as { turnX1?: number; turnX2?: number; junctionY?: number } | undefined;
+  const route = data as
+    | { turnX1?: number; turnX2?: number; junctionY?: number; sourceGutterX?: number; sourceSafeY?: number }
+    | undefined;
   if (route?.turnX1 === undefined || route?.turnX2 === undefined) {
     const [path] = getSmoothStepPath({
       sourceX,
@@ -141,7 +143,7 @@ function CrossClusterEdge({
     });
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
-  const { turnX1, turnX2, junctionY } = route;
+  const { turnX1, turnX2, junctionY, sourceGutterX, sourceSafeY } = route;
   // The initial exit must always move the line AWAY from source (right,
   // toward turnX1) — never backward. turnX1 normally sits well past the
   // source (a real card), so this is a no-op for every ordinary edge.
@@ -156,10 +158,36 @@ function CrossClusterEdge({
   // rendering connected edges below a measurable size — confirmed via
   // DOM diffing, not a fix worth relying on).
   const exitX1 = Math.max(turnX1, sourceX);
-  const path =
-    junctionY !== undefined
-      ? `M ${sourceX},${sourceY} L ${exitX1},${sourceY} L ${exitX1},${junctionY} L ${turnX2},${junctionY} L ${turnX2},${targetY} L ${targetX},${targetY}`
-      : `M ${sourceX},${sourceY} L ${exitX1},${sourceY} L ${exitX1},${targetY} L ${turnX2},${targetY} L ${targetX},${targetY}`;
+
+  // Build the path as an ordered list of waypoints instead of nested
+  // ternaries — the safe-exit detour (gutter hop + rise clear of the
+  // source container) is now an optional prefix that composes cleanly
+  // with whichever route the rest of the path already takes.
+  const points: [number, number][] = [[sourceX, sourceY]];
+  if (sourceGutterX !== undefined && sourceSafeY !== undefined) {
+    points.push([sourceGutterX, sourceY]);
+    points.push([sourceGutterX, sourceSafeY]);
+    points.push([exitX1, sourceSafeY]);
+  } else {
+    points.push([exitX1, sourceY]);
+  }
+  // The vertical change to the target's row must happen HERE, at exitX1,
+  // before ever moving toward turnX2 — this is the point that went
+  // missing in the array rewrite (the original template-string path had
+  // it as `L ${exitX1},${targetY}`, right after the exit segment). Without
+  // it, the path jumped straight from exitX1 to turnX2 while ALSO
+  // changing Y in the same segment — a diagonal, not the intended
+  // right-angle turn.
+  if (junctionY !== undefined) {
+    points.push([exitX1, junctionY]);
+    points.push([turnX2, junctionY]);
+  } else {
+    points.push([exitX1, targetY]);
+  }
+  points.push([turnX2, targetY]);
+  points.push([targetX, targetY]);
+
+  const path = points.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x},${y}`).join(" ");
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
@@ -305,12 +333,13 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     // so no extra "safe lane" detour is needed to dodge anything; turnX1
     // and turnX2 alone are already enough to guarantee a clean path.
     const GUTTER_HALF = (CLUSTER_COLUMN_WIDTH - NODE_WIDTH) / 2;
+    const SOURCE_CLEAR_MARGIN = 16;
 
     function crossClusterRoute(
       source: string,
       target: string,
       laneOffset: number = 0
-    ): { turnX1: number; turnX2: number } | undefined {
+    ): { turnX1: number; turnX2: number; sourceGutterX: number; sourceSafeY: number } | undefined {
       // A collapsed group renders as a single pill, not a column of member
       // rows — there's no gutter to route through on that side. Bail out
       // here and let CrossClusterEdge fall back to its plain smoothstep
@@ -332,6 +361,24 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         ? targetBounds.left + targetNode.position.x - GUTTER_HALF
         : targetNode.position.x - GUTTER_HALF;
 
+      // A straight exit at the source's own row can cut through an
+      // unrelated card in a DIFFERENT local column (e.g. a parent's row
+      // coinciding, by pure coincidence of independent per-column
+      // stacking, with a sibling's row in the children column) on its way
+      // to turnX1 — confirmed via fiber: Mateo's row landed exactly on
+      // Mayra's. Route around it: hop into the narrow gutter right after
+      // the source's OWN local column (safe — before entering any other
+      // column's X range), rise/fall clear of every row in the whole
+      // source container, THEN travel the long stretch to turnX1 at that
+      // safe height. Always exits toward the top — a fixed, member-
+      // independent choice, so every edge from this same container still
+      // travels together for their shared leg regardless of which
+      // specific person is the source.
+      const sourceGutterX = sourceBounds
+        ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF
+        : turnX1;
+      const sourceSafeY = sourceBounds ? sourceBounds.top - SOURCE_CLEAR_MARGIN : sourceNode.position.y;
+
       // turnX1 stays IDENTICAL for every edge sharing this same
       // source/target container pair — that's what makes them travel as
       // one visible trunk for the shared leg, exactly like within a
@@ -339,7 +386,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // line turns to descend into the target — so a different subtype
       // still splits off, but only in a short final fork right before
       // reaching the target.
-      return { turnX1, turnX2: turnX2 + laneOffset };
+      return { turnX1, turnX2: turnX2 + laneOffset, sourceGutterX, sourceSafeY };
     }
 
     // A sibling clique stores a pairwise DB row for EVERY combination (a
