@@ -69,6 +69,14 @@ const SIBLING_SUBTYPE_OFFSET: Record<string, number> = {
   step: -12,
   adoptive: 24,
 };
+// Strength ranking used to pick which bond a redundant-for-connectivity
+// edge is allowed to displace — see the tiered Kruskal pass below.
+const SIBLING_SUBTYPE_STRENGTH: Record<string, number> = {
+  full: 0,
+  half: 1,
+  step: 2,
+  adoptive: 3,
+};
 
 function ParentTrunkEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
   const offset = (data as { offset?: number } | undefined)?.offset ?? 0;
@@ -381,6 +389,56 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     const GUTTER_HALF = (CLUSTER_COLUMN_WIDTH - NODE_WIDTH) / 2;
     const SOURCE_CLEAR_MARGIN = 16;
 
+    // A node's TRUE absolute Y — nested members store position.y relative
+    // to their own container, so their real Y is the container's top
+    // plus that offset; a top-level node's position.y is already
+    // absolute.
+    function absoluteNodeY(nodeId: string): number {
+      const n = nodeById.get(nodeId);
+      if (!n) return 0;
+      const containerId = containerByNodeId.get(nodeId);
+      const bounds = containerId ? containerBoundsById.get(containerId) : undefined;
+      return bounds ? bounds.top + n.position.y : n.position.y;
+    }
+
+    // A turnX1 anchored only to the SOURCE's own right edge is safe as
+    // long as no OTHER container shares its vertical range and extends
+    // further right — true almost always, but not when a source container
+    // is narrower than a same-column neighbor stacked directly above or
+    // below it. Confirmed via fiber: Eduardo's own 2-person family (right
+    // edge ~805px) sits in the same column as, and directly above,
+    // Familia Vicencio (right edge ~1023px) — a bridge exiting at
+    // Eduardo's own right edge and descending toward Elida cut straight
+    // through Vicencio's much wider box (318 of 400 sampled points fell
+    // inside it). The real safe exit is the rightmost right-edge among
+    // EVERY container whose vertical range overlaps the span the line
+    // will actually travel through, not just the one container the line
+    // happens to start in — a general "clear every obstacle in the
+    // corridor" rule, not a fix specific to Eduardo or Vicencio.
+    function widestRightEdgeInCorridor(ownRight: number, yMin: number, yMax: number): number {
+      // Only push X out when a vertically-overlapping container's box
+      // actually ENGULFS the current candidate (left <= x < right) — a
+      // container that's simply "somewhere at that height" but off to
+      // the side (e.g. Vicencio, when the line in question is Antonio's
+      // own bridge passing well to its left through the empty gap) is
+      // not an obstacle and must not force a detour. Loops because
+      // pushing past one obstacle can land inside a second one stacked
+      // further out.
+      let x = ownRight;
+      let movedThisPass = true;
+      while (movedThisPass) {
+        movedThisPass = false;
+        for (const bounds of containerBoundsById.values()) {
+          const verticalOverlap = bounds.top < yMax && bounds.bottom > yMin;
+          if (verticalOverlap && bounds.left <= x && bounds.right > x) {
+            x = bounds.right;
+            movedThisPass = true;
+          }
+        }
+      }
+      return x;
+    }
+
     function crossClusterRoute(
       source: string,
       target: string,
@@ -403,7 +461,9 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
       if (!sourceBounds && !targetBounds) return undefined;
 
-      const turnX1 = sourceBounds ? sourceBounds.right + GUTTER_HALF : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
+      const turnX1 = sourceBounds
+        ? widestRightEdgeInCorridor(sourceBounds.right, Math.min(absoluteNodeY(source), absoluteNodeY(target)), Math.max(absoluteNodeY(source), absoluteNodeY(target))) + GUTTER_HALF
+        : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
       const turnX2 = targetBounds
         ? targetBounds.left + targetNode.position.x - GUTTER_HALF
         : targetNode.position.x - GUTTER_HALF;
@@ -544,9 +604,28 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       return Number.MAX_SAFE_INTEGER; // cross-container: last resort only
     }
 
-    const sortedSiblingEdges = [...siblingEdges].sort(
-      (a, b) => siblingEdgeCost(a) - siblingEdgeCost(b)
-    );
+    // Sort by SUBTYPE STRENGTH first, cost only as a tie-break within the
+    // same strength. A single mixed-strength MST pass (cost only) treats
+    // any edge that satisfies connectivity as equally good — so a "half"
+    // edge could end up as the ONLY thing connecting two people who are
+    // ALSO directly "full" siblings to each other (Elida and Eduardo,
+    // each individually bridged to the Antonio clique by a "half" edge,
+    // while their own direct "full" row got dropped as "redundant" once
+    // the mixed pass had already connected them some other way — even
+    // though "redundant for connectivity" isn't the same as "redundant
+    // information": the two edges say different, both-true things).
+    // Processing strongest-first fixes this generally, with no per-family
+    // special case: full bonds claim their union FIRST, so a full pair
+    // scattered across any number of different containers keeps its own
+    // direct edge — and only afterwards do weaker tiers fill in whatever
+    // connectivity full alone didn't already provide.
+    const sortedSiblingEdges = [...siblingEdges].sort((a, b) => {
+      const strengthDiff =
+        (SIBLING_SUBTYPE_STRENGTH[a.data.siblingSubtype ?? "full"] ?? 99) -
+        (SIBLING_SUBTYPE_STRENGTH[b.data.siblingSubtype ?? "full"] ?? 99);
+      if (strengthDiff !== 0) return strengthDiff;
+      return siblingEdgeCost(a) - siblingEdgeCost(b);
+    });
 
     const keepSiblingEdgeId = new Set<string>();
     for (const e of sortedSiblingEdges) {
@@ -655,7 +734,20 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       if (members.size === 0) continue;
 
       const junctionY = containerJunctionY(edgesFromThisSource[0].source) ?? (bounds.top + bounds.bottom) / 2;
-      const turnX1 = bounds.right + GUTTER_HALF;
+
+      // Every distinct destination this source family bridges to, in
+      // this render — used both to pick each member's representative
+      // color and to know how many bridge lines to fan out below.
+      const hubTargets = new Set(edgesFromThisSource.map((e) => e.target));
+
+      // turnX1 is shared by every bridge leaving this junction, so it
+      // must clear every obstacle across the WHOLE vertical span the
+      // junction will reach into — from its own Y down/up to every
+      // target's Y — not just its own source container.
+      const targetYs = [...hubTargets].map((t) => absoluteNodeY(t));
+      const turnX1 =
+        widestRightEdgeInCorridor(bounds.right, Math.min(junctionY, ...targetYs), Math.max(junctionY, ...targetYs)) +
+        GUTTER_HALF;
       const junctionId = `sibling-junction-${sourceContainerId}`;
 
       junctionNodes.push({
@@ -664,11 +756,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         position: { x: turnX1, y: junctionY },
         data: {},
       });
-
-      // Every distinct destination this source family bridges to, in
-      // this render — used both to pick each member's representative
-      // color and to know how many bridge lines to fan out below.
-      const hubTargets = new Set(edgesFromThisSource.map((e) => e.target));
 
       for (const memberId of members) {
         const representativeEdge = siblingEdges.find(
