@@ -152,45 +152,44 @@ function CrossClusterEdge({
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
   const { turnX1, turnX2, junctionY, sourceGutterX, sourceSafeY } = route;
-  // The initial exit must always move the line AWAY from source (right,
-  // toward turnX1) — never backward. turnX1 normally sits well past the
-  // source (a real card), so this is a no-op for every ordinary edge.
-  // But the sibling hub's junction node has its own source-right handle
-  // positioned slightly to the RIGHT of the node's own X (React Flow
-  // places Position.Left and Position.Right handles at opposite edges of
-  // a node's box) — for that one bridge edge, sourceX can end up already
-  // past turnX1, and tracing to turnX1 from there means briefly doubling
-  // back leftward first. That backward blip was the stray loose segment.
-  // Clamping to whichever is further out removes it without touching
-  // node sizing (which turned out to make React Flow silently stop
-  // rendering connected edges below a measurable size — confirmed via
-  // DOM diffing, not a fix worth relying on).
-  const exitX1 = Math.max(turnX1, sourceX);
 
   // Build the path as an ordered list of waypoints instead of nested
   // ternaries — the safe-exit detour (gutter hop + rise clear of the
   // source container) is now an optional prefix that composes cleanly
   // with whichever route the rest of the path already takes.
   const points: [number, number][] = [[sourceX, sourceY]];
+  let effectiveTurnX1: number;
   if (sourceGutterX !== undefined && sourceSafeY !== undefined) {
+    // This route came from crossClusterRoute(), which already computed
+    // turnX1's direction deliberately — including the LEFT corridor for
+    // chronologically-older same-column families. Trust it as-is; do NOT
+    // clamp toward sourceX here, or a genuine leftward route collapses
+    // right back to sourceX and never actually turns.
     points.push([sourceGutterX, sourceY]);
     points.push([sourceGutterX, sourceSafeY]);
-    points.push([exitX1, sourceSafeY]);
+    effectiveTurnX1 = turnX1;
+    points.push([effectiveTurnX1, sourceSafeY]);
   } else {
-    points.push([exitX1, sourceY]);
+    // The sibling hub's junction node is a different situation: it's a
+    // synthetic node whose own source-right handle sits slightly to the
+    // RIGHT of the node's own X (React Flow places Position.Left and
+    // Position.Right handles at opposite edges of a node's box) — sourceX
+    // can end up already past turnX1, and tracing to turnX1 from there
+    // means briefly doubling back leftward first. That backward blip was
+    // the original stray loose segment this clamp was built for. It's
+    // scoped to ONLY this branch (no sourceGutterX/sourceSafeY, meaning
+    // the route did NOT go through crossClusterRoute()'s own direction
+    // logic) so it can't interfere with a deliberate left corridor.
+    effectiveTurnX1 = Math.max(turnX1, sourceX);
+    points.push([effectiveTurnX1, sourceY]);
   }
-  // The vertical change to the target's row must happen HERE, at exitX1,
-  // before ever moving toward turnX2 — this is the point that went
-  // missing in the array rewrite (the original template-string path had
-  // it as `L ${exitX1},${targetY}`, right after the exit segment). Without
-  // it, the path jumped straight from exitX1 to turnX2 while ALSO
-  // changing Y in the same segment — a diagonal, not the intended
-  // right-angle turn.
+  // The vertical change to the target's row must happen HERE, at
+  // effectiveTurnX1, before ever moving toward turnX2.
   if (junctionY !== undefined) {
-    points.push([exitX1, junctionY]);
+    points.push([effectiveTurnX1, junctionY]);
     points.push([turnX2, junctionY]);
   } else {
-    points.push([exitX1, targetY]);
+    points.push([effectiveTurnX1, targetY]);
   }
   points.push([turnX2, targetY]);
   points.push([targetX, targetY]);
@@ -401,6 +400,41 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       return bounds ? bounds.top + n.position.y : n.position.y;
     }
 
+    // Resolves a node id (real person or collapsed pill) back to the
+    // FamilyGroup it belongs to — needed to compare chronological order
+    // between source and target families for the left-corridor check
+    // below, and reused by the bridge-lane ranking further down.
+    function resolveFamilyGroup(nodeId: string): FamilyGroup | undefined {
+      const containerId = containerByNodeId.get(nodeId);
+      const key = nodeId.startsWith("group-")
+        ? nodeId.slice("group-".length)
+        : containerId?.startsWith("cluster-")
+          ? containerId.slice("cluster-".length)
+          : undefined;
+      return key !== undefined ? familyGroups.find((g) => g.key === key) : undefined;
+    }
+
+    // Same fallback chain used for a family's chronological position
+    // elsewhere: the couple's own spouse_of start_date, else their eldest
+    // child's birth_date, else their eldest parent's birth_date.
+    function familyStartDate(group: FamilyGroup): string | null {
+      if (group.parents.length === 2) {
+        const [a, b] = group.parents;
+        const spouseRel = relationships.find(
+          (r) =>
+            r.type === "spouse_of" &&
+            ((r.person_a_id === a.id && r.person_b_id === b.id) ||
+              (r.person_a_id === b.id && r.person_b_id === a.id))
+        );
+        if (spouseRel?.start_date) return spouseRel.start_date;
+      }
+      const childDates = group.children.map((c) => c.birth_date).filter((d): d is string => !!d).sort();
+      if (childDates.length > 0) return childDates[0];
+      const parentDates = group.parents.map((p) => p.birth_date).filter((d): d is string => !!d).sort();
+      if (parentDates.length > 0) return parentDates[0];
+      return null;
+    }
+
     // A turnX1 anchored only to the SOURCE's own right edge is safe as
     // long as no OTHER container shares its vertical range and extends
     // further right — true almost always, but not when a source container
@@ -461,8 +495,42 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
       if (!sourceBounds && !targetBounds) return undefined;
 
+      // LEFT CORRIDOR: when source and target share the exact same
+      // generation column (stacked directly above/below, not side by
+      // side), the gap between that column and the PREVIOUS one is
+      // always empty — nothing else ever lives there — so it's a free,
+      // always-safe lane needing no obstacle-clearing math, unlike the
+      // right side (which has to widen past whatever else shares that
+      // column). Used only when ALL of these hold:
+      //   1. Source and target really do share a column (same left edge).
+      //   2. The source family started chronologically BEFORE the target
+      //      family — matches the rule that older branches read on the
+      //      left, newer on the right.
+      //   3. The source person is already in the LEFTMOST local column of
+      //      their own container (e.g. a parent) — exiting left is then
+      //      immediately safe. A source further right (e.g. a child, who'd
+      //      have to cross their own parents' column first to reach the
+      //      left edge) isn't handled yet — falls back to the right
+      //      corridor below, documented here rather than silently assumed
+      //      safe. Revisit if a real case needs it.
+      const sourceGroupForSide = sourceBounds ? resolveFamilyGroup(source) : undefined;
+      const targetGroupForSide = targetBounds ? resolveFamilyGroup(target) : undefined;
+      const sourceIsLeftmostColumn = sourceNode.position.x < CLUSTER_COLUMN_WIDTH;
+      const useLeftCorridor =
+        !!sourceBounds &&
+        !!targetBounds &&
+        sourceBounds.left === targetBounds.left &&
+        sourceIsLeftmostColumn &&
+        !!sourceGroupForSide &&
+        !!targetGroupForSide &&
+        (familyStartDate(sourceGroupForSide) ?? "9999-99-99").localeCompare(
+          familyStartDate(targetGroupForSide) ?? "9999-99-99"
+        ) < 0;
+
       const turnX1 = sourceBounds
-        ? widestRightEdgeInCorridor(sourceBounds.right, Math.min(absoluteNodeY(source), absoluteNodeY(target)), Math.max(absoluteNodeY(source), absoluteNodeY(target))) + GUTTER_HALF
+        ? useLeftCorridor
+          ? sourceBounds.left - GUTTER_HALF
+          : widestRightEdgeInCorridor(sourceBounds.right, Math.min(absoluteNodeY(source), absoluteNodeY(target)), Math.max(absoluteNodeY(source), absoluteNodeY(target))) + GUTTER_HALF
         : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
       const turnX2 = targetBounds
         ? targetBounds.left + targetNode.position.x - GUTTER_HALF
@@ -745,9 +813,41 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // junction will reach into — from its own Y down/up to every
       // target's Y — not just its own source container.
       const targetYs = [...hubTargets].map((t) => absoluteNodeY(t));
-      const turnX1 =
-        widestRightEdgeInCorridor(bounds.right, Math.min(junctionY, ...targetYs), Math.max(junctionY, ...targetYs)) +
-        GUTTER_HALF;
+
+      // Same LEFT CORRIDOR idea as crossClusterRoute() (see there for the
+      // full rationale) — but shared turnX1 means it only applies here
+      // when it's safe for EVERY destination at once: same column as ALL
+      // of them, source family older than ALL of them, AND every member
+      // contributing a spoke to this junction is already in their own
+      // container's leftmost local column (otherwise that member's spoke
+      // would have to cross back through another local column to reach a
+      // left-shifted junction). Any single failing condition falls back
+      // to the right corridor for the whole junction — never a mix.
+      const sourceGroupForHub = resolveFamilyGroup(edgesFromThisSource[0].source);
+      const allMembersLeftmostColumn = Array.from(members).every(
+        (m) => (nodeById.get(m)?.position.x ?? Infinity) < CLUSTER_COLUMN_WIDTH
+      );
+      const useLeftCorridorForHub =
+        allMembersLeftmostColumn &&
+        !!sourceGroupForHub &&
+        [...hubTargets].every((t) => {
+          const targetContainerId = containerByNodeId.get(t);
+          const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
+          const targetGroup = resolveFamilyGroup(t);
+          return (
+            !!targetBounds &&
+            targetBounds.left === bounds.left &&
+            !!targetGroup &&
+            (familyStartDate(sourceGroupForHub) ?? "9999-99-99").localeCompare(
+              familyStartDate(targetGroup) ?? "9999-99-99"
+            ) < 0
+          );
+        });
+
+      const turnX1 = useLeftCorridorForHub
+        ? bounds.left - GUTTER_HALF
+        : widestRightEdgeInCorridor(bounds.right, Math.min(junctionY, ...targetYs), Math.max(junctionY, ...targetYs)) +
+          GUTTER_HALF;
       const junctionId = `sibling-junction-${sourceContainerId}`;
 
       junctionNodes.push({
@@ -785,7 +885,29 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         if (!distinctTargetEdges.has(e.target)) distinctTargetEdges.set(e.target, e);
       }
 
-      for (const [target, crossEdge] of distinctTargetEdges.entries()) {
+      // Left = older, right = newer — a GENERAL rule, not special-cased
+      // to any pair of people. When one junction bridges to several
+      // destination families at once, each bridge's exit lane is ranked
+      // by that destination family's own start date (spouse_of start_date
+      // if the family has a recorded couple, else the eldest child's
+      // birth_date, else the eldest parent's birth_date) and spread
+      // symmetrically left (older) to right (newer) around the
+      // junction's own X. A single destination — the common case — gets
+      // offset 0, unchanged. resolveFamilyGroup/familyStartDate are
+      // defined once, above, and shared with the left-corridor check in
+      // crossClusterRoute().
+      function bridgeSortKey(target: string): string {
+        const group = resolveFamilyGroup(target);
+        return (group ? familyStartDate(group) : null) ?? "9999-99-99"; // unknown → sorts last (rightmost)
+      }
+
+      const BRIDGE_LANE_STEP = 10;
+      const rankedTargets = Array.from(distinctTargetEdges.entries()).sort(
+        (a, b) => bridgeSortKey(a[0]).localeCompare(bridgeSortKey(b[0]))
+      );
+
+      rankedTargets.forEach(([target, crossEdge], rankIndex) => {
+        const bridgeLaneOffset = (rankIndex - (rankedTargets.length - 1) / 2) * BRIDGE_LANE_STEP;
         const targetContainerId = containerByNodeId.get(target);
         const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
         const targetNode = nodeById.get(target);
@@ -810,14 +932,14 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           sourceHandle: "source-right",
           targetHandle: "target-left",
           type: "crossClusterStep",
-          data: { turnX1, turnX2 },
+          data: { turnX1: turnX1 + bridgeLaneOffset, turnX2 },
           style: {
             strokeWidth: 1.5,
             stroke: colorBySiblingSubtype[bridgeSubtype] ?? colorBySiblingSubtype.full,
             strokeDasharray: "1 4",
           },
         });
-      }
+      });
     }
 
     const flowEdges: Edge[] = layout.edges
