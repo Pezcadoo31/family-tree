@@ -38,6 +38,14 @@ export function PersonNode({ data }: PersonNodeProps) {
     <>
       <Handle type="target" position={Position.Left} id="target-left" className="bg-violet-accent/50! border-none! w-2! h-2!" />
       <Handle type="target" position={Position.Top} id="target-top" className="bg-violet-accent/50! border-none! w-2! h-2!" />
+      {/* Purely additive — a real SOURCE handle on the left edge, for
+          connections that need to exit toward something on their left
+          (e.g. a sibling hub junction routed through the left corridor).
+          Doesn't replace or touch target-left; that one still exists for
+          incoming connections (parent_of, pet_relationship) entering
+          from the left. React Flow allows multiple handles at the same
+          Position as long as their ids differ, which these do. */}
+      <Handle type="source" position={Position.Left} id="source-left" className="bg-violet-accent/50! border-none! w-2! h-2!" />
 
       <Link
         href={`/persona/${person.id}`}

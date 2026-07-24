@@ -865,11 +865,26 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         );
         if (!representativeEdge) continue; // no real row to any hub destination — don't invent one
         const subtype = representativeEdge.data.siblingSubtype ?? "full";
+        // PersonNode only has 4 fixed handles (target-left, target-top,
+        // source-right, source-bottom) — there's no "source-left". A
+        // spoke always used source-right regardless of where the
+        // junction actually sits, so when the junction lives in the left
+        // corridor, the spoke still exited from the member's RIGHT edge
+        // and had to travel backward to reach it — a geometrically
+        // continuous path (confirmed via fiber: both endpoints matched
+        // their real handle positions exactly), but visually anchored on
+        // the wrong side of the card, reading as disconnected even
+        // though it wasn't. target-left is the only handle that actually
+        // faces the junction's real direction in that case, so it's
+        // reused here as the exit point — this app already treats these
+        // 4 IDs as generic anchor points rather than strict source/target
+        // roles (mascota and parent_of edges already borrow "source-right"
+        // /"target-left" across different relationship kinds the same way).
         junctionEdges.push({
           id: `${junctionId}-spoke-${memberId}`,
           source: memberId,
           target: junctionId,
-          sourceHandle: "source-right",
+          sourceHandle: useLeftCorridorForHub ? "source-left" : "source-right",
           targetHandle: "target-left",
           type: "siblingSpoke",
           style: {
