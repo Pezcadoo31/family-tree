@@ -478,7 +478,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       target: string,
       laneOffset: number = 0,
       sourceLaneOffset: number = 0
-    ): { turnX1: number; turnX2: number; sourceGutterX: number; sourceSafeY: number } | undefined {
+    ): { turnX1: number; turnX2: number; sourceGutterX: number; sourceSafeY: number; usedLeftCorridor: boolean } | undefined {
       // A collapsed group renders as a single pill, not a column of member
       // rows — there's no gutter to route through on that side. Bail out
       // here and let CrossClusterEdge fall back to its plain smoothstep
@@ -587,7 +587,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // line turns to descend into the target — so a different subtype
       // still splits off, but only in a short final fork right before
       // reaching the target.
-      return { turnX1, turnX2: turnX2 + laneOffset, sourceGutterX, sourceSafeY };
+      return { turnX1, turnX2: turnX2 + laneOffset, sourceGutterX, sourceSafeY, usedLeftCorridor: useLeftCorridor };
     }
 
     // A sibling clique stores a pairwise DB row for EVERY combination (a
@@ -773,8 +773,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     }
 
     for (const [sourceContainerId, edgesFromThisSource] of crossEdgesBySourceContainer.entries()) {
-      for (const e of edgesFromThisSource) suppressedSiblingEdgeIds.add(e.id);
-
       const bounds = containerBoundsById.get(sourceContainerId);
       if (!bounds) continue;
 
@@ -800,6 +798,20 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         }
       }
       if (members.size === 0) continue;
+
+      // A "hub" — a junction with spokes converging into one shared
+      // bridge — exists to represent MULTIPLE people converging from the
+      // same family. With exactly one contributing member (e.g. Eduardo,
+      // alone in his own container), there's no convergence to show: the
+      // spoke-then-bridge shape only adds a visible extra hop that a
+      // plain direct connection wouldn't have. Leave these edges
+      // unsuppressed here so they fall through to the ordinary sibling_of
+      // rendering path below, which already produces a single clean
+      // crossClusterRoute() line — the same mechanism (and same visual
+      // quality) already used for Celia/Mateo's lines into Elida.
+      if (members.size === 1) continue;
+
+      for (const e of edgesFromThisSource) suppressedSiblingEdgeIds.add(e.id);
 
       const junctionY = containerJunctionY(edgesFromThisSource[0].source) ?? (bounds.top + bounds.bottom) / 2;
 
@@ -1069,18 +1081,46 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         };
         const color = colorBySiblingSubtype[e.data.siblingSubtype ?? "full"] ?? colorBySiblingSubtype.full;
 
+        // junctionY represents "the vertical midpoint of everyone
+        // converging from the source's clique" — meaningful only when 2+
+        // people in that container actually share this sibling group. For
+        // a lone contributor (e.g. Eduardo, alone in his own container),
+        // containerJunctionY silently returns just that one person's own
+        // row — not a real convergence point — which forced the path to
+        // detour toward it and back before continuing (confirmed via
+        // fiber: an extra rise-then-fall in Y that Mateo's equivalent
+        // connection, with no junctionY, never has). Only attach it when
+        // there's a real clique of 2+ to represent.
+        const sourceCliqueRoot = findSpanningRoot(e.source);
+        const sourceCliqueSize = sourceContainer3
+          ? new Set(
+              siblingEdges.flatMap((se) => [se.source, se.target]).filter(
+                (cand) => containerByNodeId.get(cand) === sourceContainer3 && findSpanningRoot(cand) === sourceCliqueRoot
+              )
+            ).size
+          : 1;
+
+        const crossRoute = !sameContainer
+          ? crossClusterRoute(e.source, e.target, SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0)
+          : undefined;
+
         return {
           id: e.id,
           source: e.source,
           target: e.target,
-          sourceHandle: sameContainer ? "source-bottom" : "source-right",
+          // Mirrors crossClusterRoute()'s own left/right decision instead
+          // of hardcoding source-right — a fixed handle here made the
+          // line exit from the wrong side of the card whenever the route
+          // itself had correctly chosen the left corridor (confirmed via
+          // fiber against the card's real handle rects).
+          sourceHandle: sameContainer ? "source-bottom" : crossRoute?.usedLeftCorridor ? "source-left" : "source-right",
           targetHandle: sameContainer ? "target-top" : "target-left",
           type: sameContainer ? "siblingTrunk" : "crossClusterStep",
           data: sameContainer
             ? { trunkOffset: SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0 }
             : {
-                ...crossClusterRoute(e.source, e.target, SIBLING_SUBTYPE_OFFSET[e.data.siblingSubtype ?? "full"] ?? 0),
-                junctionY: containerJunctionY(e.source),
+                ...crossRoute,
+                ...(sourceCliqueSize > 1 ? { junctionY: containerJunctionY(e.source) } : {}),
               },
           style: {
             strokeWidth: 1.5,
