@@ -428,6 +428,22 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     // and turnX2 alone are already enough to guarantee a clean path.
     const GUTTER_HALF = (CLUSTER_COLUMN_WIDTH - NODE_WIDTH) / 2;
     const SOURCE_CLEAR_MARGIN = 16;
+    // The cross-container escape gutter (sourceGutterX, see
+    // crossClusterRoute() below) needs its own lane distinct from
+    // wherever a source's SAME-container trunk already runs — otherwise
+    // an escaping edge whose subtype matches the trunk's own default
+    // ("biological", offset 0) lands exactly on top of it. Pushed toward
+    // the PARENT side of the gutter's midpoint, not the children's: the
+    // midpoint only has GUTTER_HALF (20px) of slack each way before
+    // hitting a real card edge, and PARENT_SUBTYPE_OFFSET's own range
+    // (-8 to +16) already eats up to 16px of the children-side slack —
+    // leaving just 4px there, not enough to also fit an escape lane
+    // without landing inside the children's own column. The parent side
+    // is untouched by that range, leaving the full 20px free. -14 clears
+    // the trunk's most negative offset (-8) by 6px and still leaves 6px
+    // before the parent's own card edge — confirmed via fiber against
+    // the real rendered positions of both.
+    const ESCAPE_LANE_OFFSET = -14;
 
     // A node's TRUE absolute Y — nested members store position.y relative
     // to their own container, so their real Y is the container's top
@@ -496,8 +512,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
     function crossClusterRoute(
       source: string,
       target: string,
-      laneOffset: number = 0,
-      sourceLaneOffset: number = 0
+      laneOffset: number = 0
     ): { turnX1: number; turnX2: number; sourceGutterX?: number; sourceSafeY?: number; usedLeftCorridor: boolean } | undefined {
       const sourceNode = nodeById.get(source);
       const targetNode = nodeById.get(target);
@@ -595,16 +610,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // independent choice, so every edge from this same container still
       // travels together for their shared leg regardless of which
       // specific person is the source.
-      // sourceLaneOffset gives the escape point its OWN lane, distinct
-      // from wherever this same source's SAME-container trunk (e.g.
-      // Mateo's fan-out to his own biological children) already runs —
-      // otherwise a cross-container line to a stepchild leaves through
-      // nearly the same spot as the trunk to his legitimate children,
-      // reading as one tangled bundle right at the source card. Unlike
-      // laneOffset (which nudges turnX2, near the TARGET), this only
-      // affects the exit near the SOURCE — the shared travel-together
-      // behavior with another parent heading to the same target
-      // (turnX1/turnX2) is untouched.
       // A pill has no internal columns to escape from before reaching
       // turnX1 — sourceGutterX's formula assumes position.x is LOCAL to
       // the container (true for a nested person, not for a pill's own
@@ -647,9 +652,12 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // Eduardo → Elida once Eduardo's own (single-member, non-hub)
       // family was expanded: sourceGutterX(524) sat well right of
       // turnX1(260), forcing a rightward bulge before the leftward turn.
+      //
+      // ESCAPE_LANE_OFFSET (defined above) replaces what used to be a
+      // per-subtype sourceLaneOffset here — see its own comment for why.
       const sourceGutterX =
         sourceHasInternalColumns && sourceBounds && !useLeftCorridor
-          ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF + sourceLaneOffset
+          ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF + ESCAPE_LANE_OFFSET
           : undefined;
       const sourceSafeY =
         sourceHasInternalColumns && sourceBounds && !useLeftCorridor
@@ -1091,14 +1099,16 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           targetHandle: "target-left",
           type: sameContainer ? "parentTrunk" : "crossClusterStep",
           // Cross-container parent lines to the same target now share
-          // IDENTICAL turnX1/turnX2/safeY regardless of subtype — fully
-          // fused, no fork at all. Distinguishing biological vs. step
-          // visually here was explicitly traded away in favor of one
-          // clean shared connection; each edge keeps its own color in
-          // `style` below even though the paths overlap exactly.
+          // IDENTICAL turnX1/turnX2/sourceGutterX/safeY regardless of
+          // subtype — fully fused, no fork at all, all the way from the
+          // source's own escape lane to the target. Distinguishing
+          // biological vs. step visually here was explicitly traded away
+          // in favor of one clean shared connection; each edge keeps its
+          // own color in `style` below even though the paths overlap
+          // exactly.
           data: sameContainer
             ? { offset: PARENT_SUBTYPE_OFFSET[subtype] ?? 0 }
-            : crossClusterRoute(e.source, e.target, undefined, PARENT_SUBTYPE_OFFSET[subtype] ?? 0),
+            : crossClusterRoute(e.source, e.target),
           animated: true,
           style: {
             strokeWidth: 1.5,
