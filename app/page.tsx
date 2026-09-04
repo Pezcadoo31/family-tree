@@ -59,8 +59,8 @@ export default async function Home() {
     supabase.from('pets').select('*').order('name'),
     supabase.from('relationships').select(`
       *,
-      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname),
-      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname)
+      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname, birth_date),
+      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname, birth_date)
     `).order('created_at', { ascending: false }),
     getAllPetRelationships(),
   ]);

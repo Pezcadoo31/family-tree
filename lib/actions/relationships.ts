@@ -27,8 +27,8 @@ export type CreateRelationshipInput = {
 };
 
 export type RelationshipWithPersons = Relationship & {
-  person_a: { id: string; given_name: string; paternal_surname: string | null; nickname: string | null };
-  person_b: { id: string; given_name: string; paternal_surname: string | null; nickname: string | null };
+  person_a: { id: string; given_name: string; paternal_surname: string | null; nickname: string | null; birth_date: string | null };
+  person_b: { id: string; given_name: string; paternal_surname: string | null; nickname: string | null; birth_date: string | null };
 };
 
 export type ActionResult =
@@ -99,8 +99,8 @@ export async function getRelationships(): Promise<RelationshipWithPersons[]> {
     .from("relationships")
     .select(`
       *,
-      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname),
-      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname)
+      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname, birth_date),
+      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname, birth_date)
     `)
     .order("created_at", { ascending: false });
 
@@ -201,8 +201,8 @@ export async function getRelationshipsForPerson(
     .from("relationships")
     .select(`
       *,
-      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname),
-      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname)
+      person_a:persons!relationships_person_a_id_fkey(id, given_name, paternal_surname, nickname, birth_date),
+      person_b:persons!relationships_person_b_id_fkey(id, given_name, paternal_surname, nickname, birth_date)
     `)
     .or(`person_a_id.eq.${personId},person_b_id.eq.${personId}`)
     .order("created_at", { ascending: false });

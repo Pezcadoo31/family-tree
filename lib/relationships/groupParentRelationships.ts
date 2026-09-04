@@ -9,6 +9,7 @@ export type PersonRef = {
   given_name: string;
   paternal_surname: string | null;
   nickname: string | null;
+  birth_date: string | null;
 } | null;
 
 export type ParentGroupChild = {
@@ -57,6 +58,21 @@ export function groupParentChildRelationships(
       relationships: Array.from(entry.rels.values()),
     });
     byKey.set(key, group);
+  }
+
+  // Oldest first — the order they were actually born/had, same
+  // convention already used for the tree itself. Missing birth_date
+  // sorts last rather than defaulting to "oldest", since we don't
+  // actually know where they belong.
+  for (const group of byKey.values()) {
+    group.children.sort((a, b) => {
+      const dateA = a.person?.birth_date;
+      const dateB = b.person?.birth_date;
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA.localeCompare(dateB);
+    });
   }
 
   return Array.from(byKey.values());

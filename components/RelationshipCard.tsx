@@ -10,7 +10,7 @@ import type { Relationship, Person, SiblingSubtype } from "@/lib/types";
 // TYPES
 // ============================================================================
 
-type PersonRef = { id: string; given_name: string; paternal_surname: string | null; nickname: string | null } | null;
+type PersonRef = { id: string; given_name: string; paternal_surname: string | null; nickname: string | null; birth_date: string | null } | null;
 
 type RelationshipWithPersons = Relationship & {
   person_a: PersonRef;
@@ -58,7 +58,17 @@ export function RelationshipCard({ relationships, allPersons, onDeleted, viewing
       if (rel.person_a && rel.person_a.id !== viewingPersonId) map.set(rel.person_a.id, rel.person_a);
       if (rel.person_b && rel.person_b.id !== viewingPersonId) map.set(rel.person_b.id, rel.person_b);
     }
-    return Array.from(map.values());
+    // Oldest first — same convention as everywhere else this session
+    // (the tree, the parent/children panel). Missing birth_date sorts
+    // last rather than defaulting to "oldest".
+    return Array.from(map.values()).sort((a, b) => {
+      const dateA = a?.birth_date;
+      const dateB = b?.birth_date;
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA.localeCompare(dateB);
+    });
   })();
 
   const otherPerson = viewingPersonId
