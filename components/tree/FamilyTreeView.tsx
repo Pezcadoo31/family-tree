@@ -366,6 +366,19 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       nodeById.set(n.id, n);
     }
 
+    // A collapsed pill (familyGroupNode) is just as real an obstacle/
+    // anchor as an expanded container — it takes up real space and sits
+    // in the same generation grid — but it never had its own bounds
+    // entry, so any cross-container line touching one bailed out
+    // entirely (see crossClusterRoute() below) instead of using the same
+    // corridor/lane system every other connection already gets. PILL_*
+    // are fixed CSS values from FamilyGroupNode.tsx (w-[220px]; height is
+    // 3 text rows + padding, no measured DOM rect available at layout
+    // time) — a pill has no internal columns, so a few px of slack in
+    // the height estimate carries none of the row-collision risk a real
+    // container's estimate would.
+    const PILL_WIDTH = 220;
+    const PILL_HEIGHT = 84;
     const containerBoundsById = new Map<string, { left: number; right: number; top: number; bottom: number }>();
     for (const n of layout.nodes) {
       if (n.type === "familyContainerNode" && n.style) {
@@ -374,6 +387,13 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           right: n.position.x + n.style.width,
           top: n.position.y,
           bottom: n.position.y + n.style.height,
+        });
+      } else if (n.type === "familyGroupNode") {
+        containerBoundsById.set(n.id, {
+          left: n.position.x,
+          right: n.position.x + PILL_WIDTH,
+          top: n.position.y,
+          bottom: n.position.y + PILL_HEIGHT,
         });
       }
     }
@@ -458,21 +478,28 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       target: string,
       laneOffset: number = 0,
       sourceLaneOffset: number = 0
-    ): { turnX1: number; turnX2: number; sourceGutterX: number; sourceSafeY: number; usedLeftCorridor: boolean } | undefined {
-      // A collapsed group renders as a single pill, not a column of member
-      // rows — there's no gutter to route through on that side. Bail out
-      // here and let CrossClusterEdge fall back to its plain smoothstep
-      // instead.
-      if (source.startsWith("group-") || target.startsWith("group-")) return undefined;
-
+    ): { turnX1: number; turnX2: number; sourceGutterX?: number; sourceSafeY?: number; usedLeftCorridor: boolean } | undefined {
       const sourceNode = nodeById.get(source);
       const targetNode = nodeById.get(target);
       if (!sourceNode || !targetNode) return undefined;
 
+      // A pill isn't nested (containerByNodeId has no entry for it — it
+      // has no parent), but it now has its own bounds entry, keyed by
+      // its own id, from the loop above. A real nested person still
+      // resolves through containerByNodeId → their container's bounds,
+      // exactly as before.
       const sourceContainerId = containerByNodeId.get(source);
       const targetContainerId = containerByNodeId.get(target);
-      const sourceBounds = sourceContainerId ? containerBoundsById.get(sourceContainerId) : undefined;
-      const targetBounds = targetContainerId ? containerBoundsById.get(targetContainerId) : undefined;
+      const sourceBounds = sourceContainerId
+        ? containerBoundsById.get(sourceContainerId)
+        : source.startsWith("group-")
+          ? containerBoundsById.get(source)
+          : undefined;
+      const targetBounds = targetContainerId
+        ? containerBoundsById.get(targetContainerId)
+        : target.startsWith("group-")
+          ? containerBoundsById.get(target)
+          : undefined;
       if (!sourceBounds && !targetBounds) return undefined;
 
       // LEFT CORRIDOR: when source and target share the exact same
@@ -495,6 +522,16 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       //      safe. Revisit if a real case needs it.
       const sourceGroupForSide = sourceBounds ? resolveFamilyGroup(source) : undefined;
       const targetGroupForSide = targetBounds ? resolveFamilyGroup(target) : undefined;
+      // A pill's position.x is the ABSOLUTE column coordinate of the outer
+      // grid, not a local offset within a container — so this check almost
+      // always evaluates false for a pill, meaning a collapsed source can
+      // never use the left corridor even when it would geometrically qualify.
+      // Not fixed here: FamilyGroupNode has no source-left handle (only
+      // source-right/source-bottom), so even a correct calculation would have
+      // nowhere real to anchor to — adding that handle without a real case
+      // needing it risks the exact silent-drop bug from f21b691 (a handle ID
+      // referenced that didn't exist on the node). Revisit only if a real
+      // case needs a pill to use the left corridor.
       const sourceIsLeftmostColumn = sourceNode.position.x < CLUSTER_COLUMN_WIDTH;
       const useLeftCorridor =
         !!sourceBounds &&
@@ -512,8 +549,17 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           ? sourceBounds.left - GUTTER_HALF
           : widestRightEdgeInCorridor(sourceBounds.right, Math.min(absoluteNodeY(source), absoluteNodeY(target)), Math.max(absoluteNodeY(source), absoluteNodeY(target))) + GUTTER_HALF
         : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
+      // targetNode.position.x is relative to targetBounds.left ONLY for
+      // a real nested person — a pill's position is already absolute
+      // top-level, so adding it a second time here would double-count
+      // it. Enter just before the pill's own left edge instead, same
+      // idea as the nested case, without the local-offset arithmetic
+      // that doesn't apply to it.
+      const targetHasInternalColumns = targetContainerId !== undefined;
       const turnX2 = targetBounds
-        ? targetBounds.left + targetNode.position.x - GUTTER_HALF
+        ? targetHasInternalColumns
+          ? targetBounds.left + targetNode.position.x - GUTTER_HALF
+          : targetBounds.left - GUTTER_HALF
         : targetNode.position.x - GUTTER_HALF;
 
       // A straight exit at the source's own row can cut through an
@@ -539,9 +585,15 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // affects the exit near the SOURCE — the shared travel-together
       // behavior with another parent heading to the same target
       // (turnX1/turnX2) is untouched.
-      const sourceGutterX = sourceBounds
-        ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF + sourceLaneOffset
-        : turnX1;
+      // A pill has no internal columns to escape from before reaching
+      // turnX1 — sourceGutterX's formula assumes position.x is LOCAL to
+      // the container (true for a nested person, not for a pill's own
+      // absolute position), so computing it for a pill would double-count
+      // that offset the same way turnX2 almost did above. A pill just
+      // exits from its own edge directly — CrossClusterEdge already
+      // falls back to exactly that whenever sourceGutterX/sourceSafeY
+      // come back undefined, so no separate code path is needed here.
+      const sourceHasInternalColumns = sourceContainerId !== undefined;
 
       // Which margin to clear (above vs below the source container)
       // depends on where the TARGET actually sits — not a fixed "always
@@ -558,7 +610,13 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const targetCenterY = targetBounds ? (targetBounds.top + targetBounds.bottom) / 2 : targetNode.position.y;
       const aboveY = sourceBounds ? sourceBounds.top - SOURCE_CLEAR_MARGIN : sourceNode.position.y;
       const belowY = sourceBounds ? sourceBounds.bottom + SOURCE_CLEAR_MARGIN : sourceNode.position.y;
-      const sourceSafeY = targetCenterY <= sourceCenterY ? aboveY : belowY;
+
+      const sourceGutterX =
+        sourceHasInternalColumns && sourceBounds
+          ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF + sourceLaneOffset
+          : undefined;
+      const sourceSafeY =
+        sourceHasInternalColumns && sourceBounds ? (targetCenterY <= sourceCenterY ? aboveY : belowY) : undefined;
 
       // turnX1 stays IDENTICAL for every edge sharing this same
       // source/target container pair — that's what makes them travel as
