@@ -80,10 +80,118 @@ export function RelationshipCard({ relationships, allPersons, onDeleted, viewing
   // since in practice every relationship a person gets in this clique is
   // created in one bulk action (adding them as a sibling to everyone
   // already in the group) and shares the same subtype at that moment.
+  // Only reliable when the whole clique shares one subtype — see
+  // `siblingClusters` below for the case where it doesn't.
   function personSiblingSubtype(personId: string): SiblingSubtype | undefined {
     const rel = relationships.find((r) => r.person_a_id === personId || r.person_b_id === personId);
     return rel?.sibling_subtype ?? undefined;
   }
+
+  // A sibling clique can genuinely mix subtypes — e.g. two full-sibling
+  // sub-families bridged by a shared parent, so every cross-family pair is
+  // "half" while each sub-family is "full" internally. A single badge per
+  // PERSON can't represent that (whichever pair happens to be first in
+  // `relationships` wins, so a fully-full sub-family can end up labeled
+  // "Medio hermanos" for everyone just because a bridging half-sibling edge
+  // exists elsewhere in the clique). Cluster people into full-sibling
+  // sub-groups instead — same criterion the tree's sibling-hub routing
+  // already uses — and label each cluster once, plus the real relationship
+  // connecting each pair of consecutive clusters.
+  const siblingClusters = (() => {
+    // isGroup, not just type — a lone (non-group) sibling pair renders
+    // through the simple two-name branch below regardless of subtype;
+    // without this, a standalone half/step/adoptive pair shown without a
+    // viewingPersonId (e.g. on the home page) would have both people land
+    // in separate singleton clusters and wrongly get the clustered layout.
+    if (!isGroup || first.type !== "sibling_of") return null;
+
+    const parent = new Map<string, string>();
+    function find(x: string): string {
+      if (!parent.has(x)) parent.set(x, x);
+      let root = x;
+      while (parent.get(root) !== root) root = parent.get(root)!;
+      let cur = x;
+      while (parent.get(cur) !== root) {
+        const next = parent.get(cur)!;
+        parent.set(cur, root);
+        cur = next;
+      }
+      return root;
+    }
+    function union(a: string, b: string) {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(ra, rb);
+    }
+
+    for (const p of uniquePersons) if (p) find(p.id);
+    for (const rel of relationships) {
+      if (rel.sibling_subtype !== "full" || !rel.person_a || !rel.person_b) continue;
+      union(rel.person_a_id, rel.person_b_id);
+    }
+
+    const byRoot = new Map<string, NonNullable<PersonRef>[]>();
+    for (const p of uniquePersons) {
+      if (!p) continue;
+      const root = find(p.id);
+      const arr = byRoot.get(root) ?? [];
+      arr.push(p);
+      byRoot.set(root, arr);
+    }
+
+    // Uniform clique (everyone in one full-sibling cluster, or no "full"
+    // edges at all so every person is their own singleton) — the flat
+    // per-person rendering below already gets this right, no need for the
+    // clustered layout.
+    if (byRoot.size <= 1) return null;
+
+    // Chronological — oldest cluster (by its oldest member) first, same
+    // convention as everywhere else this session. uniquePersons is already
+    // sorted oldest-first, so each cluster's members come out sorted too.
+    const clusters = Array.from(byRoot.values()).sort((a, b) => {
+      const dateA = a[0]?.birth_date;
+      const dateB = b[0]?.birth_date;
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA.localeCompare(dateB);
+    });
+
+    const clusterIndexByPersonId = new Map<string, number>();
+    clusters.forEach((cluster, i) => cluster.forEach((p) => clusterIndexByPersonId.set(p.id, i)));
+
+    // Real subtype connecting two clusters, majority vote across every
+    // cross-cluster pair (ties keep whichever subtype is encountered
+    // first). With exactly 2 clusters — every case this app has produced
+    // so far — this is exhaustive. With 3+, only bridges between
+    // CONSECUTIVE clusters in the chronological layout above get a label;
+    // a non-adjacent cluster pair whose real subtype differs from the
+    // chain through the clusters between them won't get its own line.
+    // Documented rather than silently assumed — revisit with a proper
+    // matrix/legend if a real 3+-cluster case shows up.
+    function bridgeLabel(i: number, j: number): string | null {
+      const counts = new Map<SiblingSubtype, number>();
+      for (const rel of relationships) {
+        if (!rel.person_a || !rel.person_b || !rel.sibling_subtype) continue;
+        const ia = clusterIndexByPersonId.get(rel.person_a.id);
+        const ib = clusterIndexByPersonId.get(rel.person_b.id);
+        if ((ia === i && ib === j) || (ia === j && ib === i)) {
+          counts.set(rel.sibling_subtype, (counts.get(rel.sibling_subtype) ?? 0) + 1);
+        }
+      }
+      let best: SiblingSubtype | null = null;
+      let bestCount = -1;
+      for (const [subtype, count] of counts) {
+        if (count > bestCount) { best = subtype; bestCount = count; }
+      }
+      return best ? SIBLING_SUBTYPE_LABELS[best] : null;
+    }
+
+    return clusters.map((members, i) => ({
+      members,
+      bridgeToNext: i < clusters.length - 1 ? bridgeLabel(i, i + 1) : null,
+    }));
+  })();
 
   const typeLabel =
     first.type === 'parent_of'  ? first.parent_subtype  === 'biological' ? 'Padre/Madre biológico/a' :
@@ -150,7 +258,39 @@ export function RelationshipCard({ relationships, allPersons, onDeleted, viewing
         <span className="text-lg">{emoji}</span>
 
         <div className="flex-1 flex items-center gap-2 flex-wrap">
-          {isGroup ? (
+          {siblingClusters ? (
+            <div className="flex flex-col gap-1 w-full">
+              {siblingClusters.map((cluster) => (
+                <div key={cluster.members.map((p) => p.id).join("-")}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {cluster.members.map((p, i) => (
+                      <span key={p.id} className="flex items-center gap-1.5">
+                        <span className="text-sm text-zinc-200">
+                          {[p.given_name, p.paternal_surname].filter(Boolean).join(' ')}
+                        </span>
+                        {p.nickname && (
+                          <span className="text-xs text-violet-400" style={{ fontFamily: 'var(--font-script)' }}>
+                            &quot;{p.nickname}&quot;
+                          </span>
+                        )}
+                        {i < cluster.members.length - 1 && <span className="text-zinc-600">·</span>}
+                      </span>
+                    ))}
+                    {cluster.members.length > 1 && (
+                      <span className="inline-block text-center text-[10px] leading-tight px-1.5 py-0.5 bg-violet-accent/10 border border-violet-accent/20 rounded-lg text-violet-300">
+                        {SIBLING_SUBTYPE_LABELS.full}
+                      </span>
+                    )}
+                  </div>
+                  {cluster.bridgeToNext && (
+                    <div className="text-[11px] italic text-zinc-500 py-0.5">
+                      — {cluster.bridgeToNext} —
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : isGroup ? (
             <>
               {uniquePersons.map((p, i) => {
                 // Sibling subtype is stored PER PAIR, not once for the whole
