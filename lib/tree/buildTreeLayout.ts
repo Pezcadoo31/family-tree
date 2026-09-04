@@ -3,6 +3,7 @@ import type { RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
 import type { FamilyGroup } from "@/lib/family/detectFamilyGroups";
 import { layoutFamilyCluster } from "@/lib/family/layoutFamilyCluster";
+import { familyStartDate } from "@/lib/family/familyStartDate";
 
 // ============================================================================
 // TYPES
@@ -291,34 +292,6 @@ export function buildTreeLayout(
     return dateA.localeCompare(dateB);
   }
 
-  // A family's "start" date, in priority order: the marriage/union date
-  // between its parents (spouse_of.start_date) if one is recorded, else
-  // the earliest parent birth date as a proxy for "which family line
-  // started earlier". Groups with neither sort to the end of their
-  // column, same as any other undated item.
-  function familySortDate(g: FamilyGroup): string | undefined {
-    let earliestUnion: string | undefined;
-    for (let i = 0; i < g.parents.length; i++) {
-      for (let j = i + 1; j < g.parents.length; j++) {
-        const a = g.parents[i].id;
-        const b = g.parents[j].id;
-        const rel = spouseOf.find(
-          (r) => (r.person_a_id === a && r.person_b_id === b) || (r.person_a_id === b && r.person_b_id === a)
-        );
-        if (rel?.start_date && (!earliestUnion || rel.start_date < earliestUnion)) {
-          earliestUnion = rel.start_date;
-        }
-      }
-    }
-    if (earliestUnion) return earliestUnion;
-
-    const parentBirths = g.parents
-      .map((p) => p.birth_date)
-      .filter((d): d is string => !!d)
-      .sort();
-    return parentBirths[0];
-  }
-
   // --------------------------------------------------------------
   // 6+7) Loose persons AND family groups, MERGED into one chronologically
   //    sorted list per column — a family group and a standalone person at
@@ -345,7 +318,7 @@ export function buildTreeLayout(
   }
   for (const g of familyGroups) {
     const anchorGen = anchorGenByGroupKey.get(g.key) ?? 0;
-    pushColumnItem(anchorGen, { kind: "group", group: g, sortDate: familySortDate(g) });
+    pushColumnItem(anchorGen, { kind: "group", group: g, sortDate: familyStartDate(g, relationships) ?? undefined });
   }
   for (const list of columnItems.values()) {
     list.sort((a, b) => compareByDate(a.sortDate, b.sortDate));

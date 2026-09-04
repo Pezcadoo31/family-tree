@@ -22,6 +22,7 @@ import { FamilyContainerNode } from "./FamilyContainerNode";
 import { SiblingJunctionNode } from "./SiblingJunctionNode";
 import { buildTreeLayout } from "@/lib/tree/buildTreeLayout";
 import { NODE_WIDTH, CLUSTER_COLUMN_WIDTH } from "@/lib/family/layoutFamilyCluster";
+import { familyStartDate } from "@/lib/family/familyStartDate";
 import type { Person, Pet } from "@/lib/types";
 import type { RelationshipWithPersons } from "@/lib/actions/relationships";
 import type { PetRelationshipWithRefs } from "@/lib/actions/petRelationships";
@@ -414,27 +415,6 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       return key !== undefined ? familyGroups.find((g) => g.key === key) : undefined;
     }
 
-    // Same fallback chain used for a family's chronological position
-    // elsewhere: the couple's own spouse_of start_date, else their eldest
-    // child's birth_date, else their eldest parent's birth_date.
-    function familyStartDate(group: FamilyGroup): string | null {
-      if (group.parents.length === 2) {
-        const [a, b] = group.parents;
-        const spouseRel = relationships.find(
-          (r) =>
-            r.type === "spouse_of" &&
-            ((r.person_a_id === a.id && r.person_b_id === b.id) ||
-              (r.person_a_id === b.id && r.person_b_id === a.id))
-        );
-        if (spouseRel?.start_date) return spouseRel.start_date;
-      }
-      const childDates = group.children.map((c) => c.birth_date).filter((d): d is string => !!d).sort();
-      if (childDates.length > 0) return childDates[0];
-      const parentDates = group.parents.map((p) => p.birth_date).filter((d): d is string => !!d).sort();
-      if (parentDates.length > 0) return parentDates[0];
-      return null;
-    }
-
     // A turnX1 anchored only to the SOURCE's own right edge is safe as
     // long as no OTHER container shares its vertical range and extends
     // further right — true almost always, but not when a source container
@@ -523,8 +503,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
         sourceIsLeftmostColumn &&
         !!sourceGroupForSide &&
         !!targetGroupForSide &&
-        (familyStartDate(sourceGroupForSide) ?? "9999-99-99").localeCompare(
-          familyStartDate(targetGroupForSide) ?? "9999-99-99"
+        (familyStartDate(sourceGroupForSide, relationships) ?? "9999-99-99").localeCompare(
+          familyStartDate(targetGroupForSide, relationships) ?? "9999-99-99"
         ) < 0;
 
       const turnX1 = sourceBounds
@@ -850,8 +830,8 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
             !!targetBounds &&
             targetBounds.left === bounds.left &&
             !!targetGroup &&
-            (familyStartDate(sourceGroupForHub) ?? "9999-99-99").localeCompare(
-              familyStartDate(targetGroup) ?? "9999-99-99"
+            (familyStartDate(sourceGroupForHub, relationships) ?? "9999-99-99").localeCompare(
+              familyStartDate(targetGroup, relationships) ?? "9999-99-99"
             ) < 0
           );
         });
@@ -925,7 +905,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       // crossClusterRoute().
       function bridgeSortKey(target: string): string {
         const group = resolveFamilyGroup(target);
-        return (group ? familyStartDate(group) : null) ?? "9999-99-99"; // unknown → sorts last (rightmost)
+        return (group ? familyStartDate(group, relationships) : null) ?? "9999-99-99"; // unknown → sorts last (rightmost)
       }
 
       const BRIDGE_LANE_STEP = 10;
