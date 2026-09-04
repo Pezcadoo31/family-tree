@@ -138,7 +138,14 @@ function CrossClusterEdge({
   data,
 }: EdgeProps) {
   const route = data as
-    | { turnX1?: number; turnX2?: number; junctionY?: number; sourceGutterX?: number; sourceSafeY?: number }
+    | {
+        turnX1?: number;
+        turnX2?: number;
+        junctionY?: number;
+        sourceGutterX?: number;
+        sourceSafeY?: number;
+        usedLeftCorridor?: boolean;
+      }
     | undefined;
   if (route?.turnX1 === undefined || route?.turnX2 === undefined) {
     const [path] = getSmoothStepPath({
@@ -152,7 +159,7 @@ function CrossClusterEdge({
     });
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
-  const { turnX1, turnX2, junctionY, sourceGutterX, sourceSafeY } = route;
+  const { turnX1, turnX2, junctionY, sourceGutterX, sourceSafeY, usedLeftCorridor } = route;
 
   // Build the path as an ordered list of waypoints instead of nested
   // ternaries — the safe-exit detour (gutter hop + rise clear of the
@@ -170,6 +177,19 @@ function CrossClusterEdge({
     points.push([sourceGutterX, sourceSafeY]);
     effectiveTurnX1 = turnX1;
     points.push([effectiveTurnX1, sourceSafeY]);
+  } else if (usedLeftCorridor) {
+    // No gutter hop AND left corridor — crossClusterRoute() deliberately
+    // omits the hop here (the source is already in its container's
+    // leftmost local column, so there's no other column to clip through
+    // on the way left, and the gap it exits into is the same always-
+    // empty left gutter turnX1 itself uses). turnX1 is trusted directly,
+    // unlike the synthetic-junction branch below — turnX1 is deliberately
+    // LESS than sourceX here (that's the whole point of exiting left), so
+    // the Math.max clamp meant for that other case would silently cancel
+    // this one, pulling the line right back to sourceX and never turning
+    // left at all.
+    effectiveTurnX1 = turnX1;
+    points.push([effectiveTurnX1, sourceY]);
   } else {
     // The sibling hub's junction node is a different situation: it's a
     // synthetic node whose own source-right handle sits slightly to the
@@ -178,9 +198,9 @@ function CrossClusterEdge({
     // can end up already past turnX1, and tracing to turnX1 from there
     // means briefly doubling back leftward first. That backward blip was
     // the original stray loose segment this clamp was built for. It's
-    // scoped to ONLY this branch (no sourceGutterX/sourceSafeY, meaning
-    // the route did NOT go through crossClusterRoute()'s own direction
-    // logic) so it can't interfere with a deliberate left corridor.
+    // scoped to ONLY this branch (no sourceGutterX/sourceSafeY AND not a
+    // left-corridor route) so it can't interfere with a deliberate left
+    // corridor coming from crossClusterRoute() itself.
     effectiveTurnX1 = Math.max(turnX1, sourceX);
     points.push([effectiveTurnX1, sourceY]);
   }
@@ -611,12 +631,30 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       const aboveY = sourceBounds ? sourceBounds.top - SOURCE_CLEAR_MARGIN : sourceNode.position.y;
       const belowY = sourceBounds ? sourceBounds.bottom + SOURCE_CLEAR_MARGIN : sourceNode.position.y;
 
+      // The gutter hop exists to dodge OTHER local columns between the
+      // source and its exit direction (e.g. a parent's row clipping
+      // through a children column on the way to the container's right
+      // edge). It doesn't apply when useLeftCorridor is true: that's
+      // only ever true when the source is ALREADY in its container's
+      // leftmost local column (sourceIsLeftmostColumn, checked above) —
+      // there is nothing further left to clip through, and the gap it
+      // exits into is the same always-empty left gutter turnX1 itself
+      // uses. Without this, the hop still fired unconditionally and
+      // pushed the very first segment to the RIGHT of the source's own
+      // column before turning left — visually the line looked like it
+      // exited from the wrong side, even though sourceHandle was
+      // correctly "source-left" the whole time. Confirmed via fiber on
+      // Eduardo → Elida once Eduardo's own (single-member, non-hub)
+      // family was expanded: sourceGutterX(524) sat well right of
+      // turnX1(260), forcing a rightward bulge before the leftward turn.
       const sourceGutterX =
-        sourceHasInternalColumns && sourceBounds
+        sourceHasInternalColumns && sourceBounds && !useLeftCorridor
           ? sourceBounds.left + sourceNode.position.x + NODE_WIDTH + GUTTER_HALF + sourceLaneOffset
           : undefined;
       const sourceSafeY =
-        sourceHasInternalColumns && sourceBounds ? (targetCenterY <= sourceCenterY ? aboveY : belowY) : undefined;
+        sourceHasInternalColumns && sourceBounds && !useLeftCorridor
+          ? (targetCenterY <= sourceCenterY ? aboveY : belowY)
+          : undefined;
 
       // turnX1 stays IDENTICAL for every edge sharing this same
       // source/target container pair — that's what makes them travel as
