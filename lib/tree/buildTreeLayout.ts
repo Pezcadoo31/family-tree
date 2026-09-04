@@ -76,6 +76,19 @@ export function buildTreeLayout(
   const queue: { id: string; gen: number }[] = roots.map((r) => ({ id: r.id, gen: 0 }));
   for (const r of roots) generation.set(r.id, 0);
 
+  // Each relaxation strictly raises a node's own generation, so in a real
+  // (acyclic) family tree of N people, no single node can be relaxed more
+  // than N times — its generation is bounded by the longest chain, which
+  // can't exceed N-1 hops. A cyclic parent_of pair (A parent_of B, and B
+  // parent_of A — realistic as a data-entry mistake, e.g. the two IDs
+  // swapped when saving) would otherwise push each other back onto the
+  // queue with an ever-increasing generation forever, hanging the tab.
+  // Capping at N and bailing out on the offending node breaks the cycle
+  // without touching how any genuinely deep, acyclic chain resolves.
+  const relaxationCount = new Map<string, number>();
+  const maxRelaxations = persons.length;
+  let cycleDetected = false;
+
   while (queue.length > 0) {
     const { id, gen } = queue.shift()!;
     const children = parentOf.filter((r) => r.person_a_id === id).map((r) => r.person_b_id);
@@ -83,10 +96,22 @@ export function buildTreeLayout(
       const existing = generation.get(childId);
       const nextGen = gen + 1;
       if (existing === undefined || nextGen > existing) {
+        const count = (relaxationCount.get(childId) ?? 0) + 1;
+        if (count > maxRelaxations) {
+          cycleDetected = true;
+          continue;
+        }
+        relaxationCount.set(childId, count);
         generation.set(childId, nextGen);
         queue.push({ id: childId, gen: nextGen });
       }
     }
+  }
+
+  if (cycleDetected) {
+    console.error(
+      "[buildTreeLayout] Detected a cycle in parent_of relationships (e.g. two people recorded as each other's parent). Generation depth for the people involved may be inaccurate — check for a reversed or duplicated relationship."
+    );
   }
 
   for (const p of persons) {
