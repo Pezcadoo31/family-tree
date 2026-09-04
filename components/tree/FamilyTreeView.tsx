@@ -227,8 +227,24 @@ function CrossClusterEdge({
 // `type: "smoothstep"` was picking its own bend point per edge
 // independently, so spokes from far-away rows (Eduardo, Mateo) could
 // overshoot past where the others converged.
-function SiblingSpokeEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd }: EdgeProps) {
-  const path = `M ${sourceX},${sourceY} L ${targetX},${sourceY} L ${targetX},${targetY}`;
+//
+// spokeOffset (from `data`) gives a per-subtype lane, same idea as
+// SiblingTrunkEdge's trunkOffset: a member whose subtype relative to the
+// hub's destination differs from the others gets its own parallel lane
+// instead of converging on the exact same point — a hub with 5
+// contributing members (1 full sibling + 4 half siblings to the same
+// destination) previously had all 5 spokes land on the identical X,
+// distinguishable only by color, no spatial separation at all. Still
+// merges fully into the real junction handle for the final short
+// approach, same "shared trunk, fork only near the end" language used
+// everywhere else in this file.
+function SiblingSpokeEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps) {
+  const spokeOffset = (data as { spokeOffset?: number } | undefined)?.spokeOffset ?? 0;
+  const bendX = targetX + spokeOffset;
+  const path =
+    spokeOffset === 0
+      ? `M ${sourceX},${sourceY} L ${targetX},${sourceY} L ${targetX},${targetY}`
+      : `M ${sourceX},${sourceY} L ${bendX},${sourceY} L ${bendX},${targetY} L ${targetX},${targetY}`;
   return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
 }
 
@@ -983,6 +999,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           sourceHandle: useLeftCorridorForHub ? "source-left" : "source-right",
           targetHandle: "target-left",
           type: "siblingSpoke",
+          data: { spokeOffset: SIBLING_SUBTYPE_OFFSET[subtype] ?? 0 },
           style: {
             strokeWidth: 1.5,
             stroke: colorBySiblingSubtype[subtype] ?? colorBySiblingSubtype.full,
