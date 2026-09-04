@@ -193,20 +193,49 @@ export default async function Home() {
       </section>
 
       {/* ====================================================================
-          PETS SECTION
+          PETS SECTION — mirrors the persons section's pattern: pets
+          belonging to a family group first (labeled with that family),
+          then loose pets. Previously this only ever rendered loosePets,
+          so any pet attached to a family (i.e. almost every real pet)
+          never showed up here at all, even though the total count above
+          it correctly said "3 registradas" — the count and the list were
+          reading from two different sources.
           ==================================================================== */}
       <section className="mb-12">
         <SectionHeader
           title="mascotas"
           meta={`${pets.length} ${pets.length === 1 ? 'registrada' : 'registradas'}`}
         />
-        {loosePets.length === 0 ? (
+        {pets.length === 0 ? (
           <EmptyState
             accent="cyan"
-            message="Aún no hay mascotas sueltas fuera de una familia."
+            message="Aún no hay mascotas registradas."
           />
         ) : (
           <div className="space-y-3">
+            {familyGroups
+              .filter((group) => group.pets.length > 0)
+              .map((group) => (
+                <div key={group.key} className="bg-surface-raised border border-cyan-accent/15 rounded-2xl px-5 py-4">
+                  <p className="text-xs text-zinc-500 mb-2.5 flex items-center gap-1.5">
+                    <span>🏠</span> {group.name}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {group.pets.map((pet) => (
+                      <Link
+                        key={pet.id}
+                        href={`/mascota/${pet.id}`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-accent/10 border border-cyan-accent/20 rounded-full text-xs text-cyan-300 hover:bg-cyan-accent/20 transition-colors"
+                      >
+                        🐾 {pet.name}
+                        {pet.nickname && (
+                          <span style={{ fontFamily: "var(--font-script)" }}>&quot;{pet.nickname}&quot;</span>
+                        )}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ))}
             {loosePets.map((pet) => (
               <PetCard key={pet.id} pet={pet} />
             ))}
