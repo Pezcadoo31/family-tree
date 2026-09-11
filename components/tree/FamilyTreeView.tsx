@@ -145,6 +145,7 @@ function CrossClusterEdge({
         sourceGutterX?: number;
         sourceSafeY?: number;
         usedLeftCorridor?: boolean;
+        postClampOffset?: number;
       }
     | undefined;
   if (route?.turnX1 === undefined || route?.turnX2 === undefined) {
@@ -159,7 +160,7 @@ function CrossClusterEdge({
     });
     return <BaseEdge path={path} style={style} markerEnd={markerEnd} />;
   }
-  const { turnX1, turnX2, junctionY, sourceGutterX, sourceSafeY, usedLeftCorridor } = route;
+  const { turnX1, turnX2, junctionY, sourceGutterX, sourceSafeY, usedLeftCorridor, postClampOffset } = route;
 
   // Build the path as an ordered list of waypoints instead of nested
   // ternaries — the safe-exit detour (gutter hop + rise clear of the
@@ -201,7 +202,20 @@ function CrossClusterEdge({
     // scoped to ONLY this branch (no sourceGutterX/sourceSafeY AND not a
     // left-corridor route) so it can't interfere with a deliberate left
     // corridor coming from crossClusterRoute() itself.
-    effectiveTurnX1 = Math.max(turnX1, sourceX);
+    //
+    // postClampOffset (from a hub bridge's own bridgeLaneOffset, ranking
+    // this destination left/right among several sharing one junction) is
+    // added AFTER the clamp resolves, not folded into turnX1 before it —
+    // the junction's real handle sits ~13px right of its own nominal X,
+    // comfortably wider than the ±5px a 2-destination bridge spreads by,
+    // so adding the offset before the clamp let Math.max silently discard
+    // it for every destination alike (confirmed via fiber: both a 2-
+    // destination hub's bridges landed on the identical effective X
+    // regardless of their distinct bridgeLaneOffset). Adding it after
+    // means the offset always survives, however many destinations share
+    // the junction, without ever requiring a backward hop below the
+    // real clamped exit point.
+    effectiveTurnX1 = Math.max(turnX1, sourceX) + (postClampOffset ?? 0);
     points.push([effectiveTurnX1, sourceY]);
   }
   // The vertical change to the target's row must happen HERE, at
@@ -1060,7 +1074,7 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           sourceHandle: "source-right",
           targetHandle: "target-left",
           type: "crossClusterStep",
-          data: { turnX1: turnX1 + bridgeLaneOffset, turnX2 },
+          data: { turnX1, turnX2, postClampOffset: bridgeLaneOffset },
           style: {
             strokeWidth: 1.5,
             stroke: colorBySiblingSubtype[bridgeSubtype] ?? colorBySiblingSubtype.full,
