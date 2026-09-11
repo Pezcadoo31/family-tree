@@ -539,6 +539,36 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
       return x;
     }
 
+    // A container's own reserved left-corridor point (container.left -
+    // GUTTER_HALF, see useLeftCorridor below) is guaranteed empty for its
+    // full height — the same guarantee that makes the left corridor safe
+    // to use in the first place — but a RIGHT-corridor route's own
+    // obstacle-clearing has no way to know some OTHER edge might be
+    // anchored to that exact point from the opposite direction. This is
+    // structural, not specific to any one family: it happens whenever the
+    // widest obstacle a right-corridor escape clears resolves to exactly
+    // one GUTTER_HALF short of some OTHER container's own left-corridor
+    // anchor, because both sides independently add/subtract the identical
+    // GUTTER_HALF margin from their own reference point. Confirmed via
+    // fiber: a parent_of escape's right-corridor turnX1 landed on the
+    // exact same X as a sibling_of left-corridor route into a different
+    // container, both anchored 20px off that container's own left edge
+    // from opposite directions.
+    //
+    // Pulled back toward the obstacle side, not the reserved container's
+    // side: the space between "just past the real obstacle" and "the
+    // reserved point" is exactly GUTTER_HALF wide by construction (both
+    // margins are GUTTER_HALF), so a 6px pull-back — the same buffer
+    // already used for the parent escape lane — clears the reserved point
+    // without giving back the clearance the real obstacle already earned.
+    function clearOfReservedLeftCorridors(candidateTurnX1: number): number {
+      for (const bounds of containerBoundsById.values()) {
+        const reserved = bounds.left - GUTTER_HALF;
+        if (Math.abs(candidateTurnX1 - reserved) < 1) return reserved - 6;
+      }
+      return candidateTurnX1;
+    }
+
     function crossClusterRoute(
       source: string,
       target: string,
@@ -609,10 +639,13 @@ export function FamilyTreeView({ persons, pets, relationships, petRelationships,
           familyStartDate(targetGroupForSide, relationships) ?? "9999-99-99"
         ) < 0;
 
+      const rightCorridorRawTurnX1 = sourceBounds
+        ? widestRightEdgeInCorridor(sourceBounds.right, Math.min(absoluteNodeY(source), absoluteNodeY(target)), Math.max(absoluteNodeY(source), absoluteNodeY(target))) + GUTTER_HALF
+        : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
       const turnX1 = sourceBounds
         ? useLeftCorridor
           ? sourceBounds.left - GUTTER_HALF
-          : widestRightEdgeInCorridor(sourceBounds.right, Math.min(absoluteNodeY(source), absoluteNodeY(target)), Math.max(absoluteNodeY(source), absoluteNodeY(target))) + GUTTER_HALF
+          : clearOfReservedLeftCorridors(rightCorridorRawTurnX1)
         : sourceNode.position.x + NODE_WIDTH + GUTTER_HALF;
       // targetNode.position.x is relative to targetBounds.left ONLY for
       // a real nested person — a pill's position is already absolute
